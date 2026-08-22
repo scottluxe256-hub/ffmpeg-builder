@@ -1,10 +1,10 @@
-name: Build FFmpeg Static Android ARM64
+Name: Build FFmpeg Static Android ARM64 (Play Store Version)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-android-static:
+  build-android-static-playstore:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -40,17 +40,7 @@ jobs:
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings aarch64-linux-android-strings
           echo "$GITHUB_WORKSPACE/bin_wrapper" >> $GITHUB_PATH
 
-      # --- LIBRARIES ---
-
-      - name: Build libfdk-aac
-        run: |
-          git clone --depth 1 https://github.com/mstorsjo/fdk-aac
-          cd fdk-aac
-          ./autogen.sh
-          export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
-          export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
-          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
-          make -j$(nproc) && make install
+      # --- LIBRARIES (Tanpa libfdk-aac) ---
 
       - name: Build x264
         run: |
@@ -73,7 +63,7 @@ jobs:
             -DENABLE_ASSEMBLY=OFF
           ninja -C x265/build install
 
-          # Memaksa pembuatan x265.pc manual menggunakan printf (aman untuk sintaks YAML)
+          # Memaksa pembuatan x265.pc manual
           mkdir -p $INSTALL_DIR/lib/pkgconfig
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
 
@@ -112,9 +102,9 @@ jobs:
             --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
-            --enable-gpl --enable-nonfree \
+            --enable-gpl \
             --enable-jni --enable-mediacodec \
-            --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 \
+            --enable-libx264 --enable-libx265 --enable-libsvtav1 \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$(nproc)
@@ -130,5 +120,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-aarch64-static
+          name: ffmpeg-android-aarch64-playstore
           path: ffmpeg_source/ffmpeg
