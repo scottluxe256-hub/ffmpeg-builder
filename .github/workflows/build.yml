@@ -23,8 +23,10 @@ jobs:
           echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
           echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
           echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> $GITHUB_ENV
-          
-          # Membuat folder wrapper agar ./configure tidak error mencari file nama lama
+
+          # Wrapper ini hanya dibutuhkan oleh autotools (fdk-aac, x264) dan configure
+          # FFmpeg sendiri, yang masih mengharapkan nama tool bergaya "aarch64-linux-android-*".
+          # x265 & SVT-AV1 tidak butuh ini lagi karena sekarang pakai toolchain file resmi NDK.
           mkdir -p $GITHUB_WORKSPACE/bin_wrapper
           cd $GITHUB_WORKSPACE/bin_wrapper
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar aarch64-linux-android-ar
@@ -58,39 +60,39 @@ jobs:
 
       - name: Build x265
         run: |
-          git clone https://github.com/videolan/x265.git
-          cd x265/source
-          cmake -G "Unix Makefiles" \
-            -DCMAKE_SYSTEM_NAME=Android -DCMAKE_SYSTEM_VERSION=29 -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
-            -DCMAKE_ANDROID_NDK=$NDK_PATH \
-            -DCMAKE_C_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
-            -DCMAKE_CXX_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
+          git clone --depth 1 --branch 4.3 https://github.com/videolan/x265.git
+          # Pakai toolchain file RESMI dari NDK, bukan setting manual CMAKE_SYSTEM_NAME.
+          # ENABLE_ASSEMBLY=OFF: assembly aarch64 x265 (ipfilter8.S dkk) tidak kompatibel
+          # dengan integrated assembler Clang -> ini penyebab error kuning kamu kemarin.
+          # ffmpeg-kit sendiri mendokumentasikan hal yang sama dan mematikan asm x265 di arm64.
+          cmake -G "Unix Makefiles" -S x265/source -B x265/build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON
-          make -j$(nproc) && make install
+            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON \
+            -DENABLE_ASSEMBLY=OFF
+          cmake --build x265/build -j$(nproc)
+          cmake --install x265/build
 
       - name: Build SVT-AV1
         run: |
-          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
-          cd SVT-AV1
-          mkdir build && cd build
-          cmake -G "Unix Makefiles" \
-            -DCMAKE_SYSTEM_NAME=Android -DCMAKE_SYSTEM_VERSION=29 -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
-            -DCMAKE_ANDROID_NDK=$NDK_PATH \
-            -DCMAKE_C_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
-            -DCMAKE_CXX_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
+          git clone --depth 1 --branch v4.2.0 https://gitlab.com/AOMediaCodec/SVT-AV1.git
+          cmake -G "Unix Makefiles" -S SVT-AV1 -B SVT-AV1/build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
-          make -j$(nproc) && make install
+          cmake --build SVT-AV1/build -j$(nproc)
+          cmake --install SVT-AV1/build
 
       # --- FFMPEG ---
 
       - name: Build FFmpeg
         run: |
-          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
+          git clone --depth 1 --branch n9.0.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg_source
           cd ffmpeg_source
           export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig"
-          
+
           ./configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
             --cc=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
@@ -100,8 +102,9 @@ jobs:
             --strip=aarch64-linux-android-strip \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libstdc++ -static-libgcc -Wl,-Bstatic" \
-            --extra-libs="-lm -ldl -lz -lpthread" \
+            --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -static-libstdc++ -static-libgcc" \
+            --extra-libs="-lm -ldl -lz -llog -landroid -lpthread" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
             --enable-gpl --enable-nonfree \
@@ -110,6 +113,19 @@ jobs:
           make -j$(nproc)
           $TOOLCHAIN/bin/llvm-strip ffmpeg
 
+      - name: Verify Binary Dependencies
+        run: |
+          cd ffmpeg_source
+          file ffmpeg
+          echo "---- NEEDED shared libraries (harus cuma library bawaan OS Android) ----"
+          $TOOLCHAIN/bin/llvm-readelf -d ffmpeg | grep -E "NEEDED|SONAME" || true
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-android-aarch64-static
+          path: ffmpeg_source/ffmpeg
+          
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
