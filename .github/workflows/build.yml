@@ -1,4 +1,4 @@
-name: Build Full FFmpeg Static Android (Multi-ABI Play Store)
+name: Build Full FFmpeg Static Android (Multi-ABI + FDK-AAC)
 
 on:
   workflow_dispatch:
@@ -15,13 +15,13 @@ jobs:
             cpu: "armv8-a"
             target_host: "aarch64-linux-android"
             api_level: "29"
-            artifact_name: "ffmpeg-android-aarch64-playstore"
+            artifact_name: "ffmpeg-android-aarch64-fdkaac"
           - abi: "armeabi-v7a"
             arch: "arm"
             cpu: "armv7-a"
             target_host: "armv7a-linux-androideabi"
             api_level: "29"
-            artifact_name: "ffmpeg-android-armv7a-playstore"
+            artifact_name: "ffmpeg-android-armv7a-fdkaac"
 
     steps:
       - name: Checkout Repository
@@ -49,14 +49,14 @@ jobs:
           if [ "${{ matrix.arch }}" = "arm" ]; then
             echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api_level }}-clang" >> $GITHUB_ENV
             echo "TARGET_CXX=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api_level }}-clang++" >> $GITHUB_ENV
-            echo "CROSS_PREFIX=arm-linux-androideabi-" >> $GITHUB_ENV
+            echo "CROSS_PREFIX=armv7a-linux-androideabi-" >> $GITHUB_ENV
           else
             echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api_level }}-clang" >> $GITHUB_ENV
             echo "TARGET_CXX=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api_level }}-clang++" >> $GITHUB_ENV
             echo "CROSS_PREFIX=aarch64-linux-android-" >> $GITHUB_ENV
           fi
 
-          # Wrapper symlinks
+          # Wrapper symlinks (Fix Tambahan: llvm-strings)
           mkdir -p $GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}
           cd $GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar ${{ matrix.target_host }}-ar || true
@@ -65,9 +65,26 @@ jobs:
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm ${{ matrix.target_host }}-nm || true
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib ${{ matrix.target_host }}-ranlib || true
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip ${{ matrix.target_host }}-strip || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings ${{ matrix.target_host }}-strings || true
+          
+          # Symlink khusus jika x264 mencari "arm-linux-androideabi-strings" pada 32-bit
+          if [ "${{ matrix.arch }}" = "arm" ]; then
+            ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings arm-linux-androideabi-strings || true
+          fi
+
           echo "$GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}" >> $GITHUB_PATH
 
       # --- LIBRARIES ---
+
+      - name: Build libfdk-aac
+        run: |
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac
+          cd fdk-aac
+          ./autogen.sh
+          export CC=$TARGET_CLANG
+          export CXX=$TARGET_CXX
+          ./configure --host=${{ matrix.target_host }} --prefix=$INSTALL_DIR --enable-static --disable-shared
+          make -j$(nproc) && make install
 
       - name: Build libopus
         run: |
@@ -155,9 +172,9 @@ jobs:
             --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
-            --enable-gpl \
+            --enable-gpl --enable-nonfree \
             --enable-jni --enable-mediacodec \
-            --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvpx --enable-libopus \
+            --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvpx --enable-libopus \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$(nproc)
