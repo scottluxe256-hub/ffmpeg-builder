@@ -21,15 +21,13 @@ jobs:
           git clone https://github.com/rdp/ffmpeg-windows-build-helpers.git
           cd ffmpeg-windows-build-helpers
           
-          # Menggunakan nama script cross_compile_ffmpeg.sh yang benar
+          # Memasukkan --enable-gpl dan --enable-nonfree ke dalam --c-sp-opts
           ./cross_compile_ffmpeg.sh \
             --build-ffmpeg-static=y \
             --compiler-flavors=win64 \
             --ffmpeg-git-checkout-version=master \
             --sandbox-ok=y \
-            --enable-gpl=y \
-            --enable-nonfree=y \
-            --c-sp-opts="--enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-amf --enable-ffnvcodec --enable-dxva2 --enable-d3d11va"
+            --c-sp-opts="--enable-gpl --enable-nonfree --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-amf --enable-ffnvcodec --enable-dxva2 --enable-d3d11va"
 
       - name: Upload FFmpeg Master Artifact
         uses: actions/upload-artifact@v4
@@ -37,3 +35,4 @@ jobs:
           name: FFmpeg-Master-Universal-Windows
           path: |
             ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg/ffmpeg.exe
+            
