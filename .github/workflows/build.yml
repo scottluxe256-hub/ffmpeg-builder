@@ -1,0 +1,39 @@
+name: Build FFmpeg Master Universal Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
+            git yasm nasm texinfo libtool-bin crossbuild-essential-mingw-w64 cmake ninja-build
+
+      - name: Build FFmpeg Git Master Universal
+        run: |
+          git clone https://github.com/rdp/ffmpeg-windows-build-helpers.git
+          cd ffmpeg-windows-build-helpers
+          
+          # Parameter kustomisasi FFmpeg untuk semua GPU + Selected Codecs
+          ./build.sh \
+            --build-ffmpeg-static=y \
+            --compiler-flavors=win64 \
+            --ffmpeg-git-checkout-version=master \
+            --sandbox-ok=y \
+            --enable-gpl=y \
+            --enable-nonfree=y \
+            --c-sp-opts="--enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-amf --enable-ffnvcodec --enable-dxva2 --enable-d3d11va"
+
+      - name: Upload FFmpeg Master Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFmpeg-Master-Universal-Windows
+          path: |
+            ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg/ffmpeg.exe
