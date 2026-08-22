@@ -21,8 +21,8 @@ jobs:
           git clone https://github.com/rdp/ffmpeg-windows-build-helpers.git
           cd ffmpeg-windows-build-helpers
           
-          # Parameter kustomisasi FFmpeg untuk semua GPU + Selected Codecs
-          ./build.sh \
+          # Menggunakan nama script cross_compile_ffmpeg.sh yang benar
+          ./cross_compile_ffmpeg.sh \
             --build-ffmpeg-static=y \
             --compiler-flavors=win64 \
             --ffmpeg-git-checkout-version=master \
@@ -37,4 +37,3 @@ jobs:
           name: FFmpeg-Master-Universal-Windows
           path: |
             ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg/ffmpeg.exe
-            
