@@ -1,10 +1,10 @@
-name: Build FFmpeg Master Universal Windows
+name: Build FFmpeg Static Android ARM64
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-android-static:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -14,103 +14,91 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo mingw-w64 g++-mingw-w64 cmake ninja-build
+            git yasm nasm texinfo cmake ninja-build wget unzip
 
-      - name: Set Environment Variables
+      - name: Setup Android NDK r26b
         run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
+          echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
           echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> $GITHUB_ENV
 
-      - name: Build libfdk-aac
+      # --- LIBRARIES ---
+
+      - name: Build libfdk-aac (Static)
         run: |
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac
           cd fdk-aac
           ./autogen.sh
-          ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-shared
+          export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
+          export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
+          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$(nproc) && make install
 
-      - name: Build x264
+      - name: Build x264 (Static)
         run: |
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
-          ./configure --host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32- --prefix=$INSTALL_DIR --enable-static --disable-cli
+          export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
+          ./configure --host=aarch64-linux-android --cross-prefix=$TOOLCHAIN/bin/aarch64-linux-android- \
+            --prefix=$INSTALL_DIR --enable-static --disable-shared --enable-pic --disable-cli
           make -j$(nproc) && make install
 
-      - name: Build x265
+      - name: Build x265 (Static)
         run: |
           git clone https://github.com/videolan/x265.git
           cd x265/source
           cmake -G "Unix Makefiles" \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
-            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+            -DCMAKE_SYSTEM_NAME=Android -DCMAKE_SYSTEM_VERSION=29 -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
+            -DCMAKE_ANDROID_NDK=$NDK_PATH \
+            -DCMAKE_C_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
+            -DCMAKE_CXX_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_SHARED=OFF \
-            -DENABLE_CLI=OFF \
-            -DEXPORT_C_API=ON
+            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON
           make -j$(nproc) && make install
 
-      - name: Build SVT-AV1
+      - name: Build SVT-AV1 (Static)
         run: |
           git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
           cd SVT-AV1
           mkdir build && cd build
           cmake -G "Unix Makefiles" \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
-            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+            -DCMAKE_SYSTEM_NAME=Android -DCMAKE_SYSTEM_VERSION=29 -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
+            -DCMAKE_ANDROID_NDK=$NDK_PATH \
+            -DCMAKE_C_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
+            -DCMAKE_CXX_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DBUILD_SHARED_LIBS=OFF ..
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           make -j$(nproc) && make install
 
-      - name: Install AMF Headers (AMD GPU)
-        run: |
-          git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git amf
-          mkdir -p $INSTALL_DIR/include/AMF
-          cp -r amf/amf/public/include/* $INSTALL_DIR/include/AMF/
-
-      - name: Install NVENC Headers (Nvidia GPU - ffnvcodec)
-        run: |
-          git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git
-          cd nv-codec-headers
-          make PREFIX=$INSTALL_DIR install
+      # --- FFMPEG ---
 
       - name: Build FFmpeg Git Master
         run: |
           git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
           cd ffmpeg_source
+          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig"
           
-          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$PKG_CONFIG_PATH"
-          
-          # Penambahan -lstdc++ dan -lpthread di extra-libs mencegah error linking pada x265/SVT-AV1
           ./configure \
-            --enable-cross-compile \
-            --cross-prefix=x86_64-w64-mingw32- \
-            --arch=x86_64 \
-            --target-os=mingw32 \
-            --pkg-config=pkg-config \
-            --pkg-config-flags="--static" \
-            --extra-cflags="-I$INSTALL_DIR/include" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++" \
-            --extra-libs="-lstdc++ -lpthread" \
+            --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
+            --cc=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
+            --cxx=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
+            --ar=$TOOLCHAIN/bin/llvm-ar --ranlib=$TOOLCHAIN/bin/llvm-ranlib --strip=$TOOLCHAIN/bin/llvm-strip \
+            --pkg-config=pkg-config --pkg-config-flags="--static" \
+            --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libstdc++ -static-libgcc -Wl,-Bstatic" \
+            --extra-libs="-lm -ldl -lz -lpthread" \
             --prefix=$INSTALL_DIR \
-            --enable-static \
-            --disable-shared \
-            --enable-gpl \
-            --enable-nonfree \
-            --enable-libfdk-aac \
-            --enable-libx264 \
-            --enable-libx265 \
-            --enable-libsvtav1 \
-            --enable-amf \
-            --enable-ffnvcodec \
-            --enable-dxva2 \
-            --enable-d3d11va
+            --enable-static --disable-shared \
+            --enable-gpl --enable-nonfree \
+            --enable-jni --enable-mediacodec \
+            --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1
           make -j$(nproc)
-          x86_64-w64-mingw32-strip ffmpeg.exe
+          $TOOLCHAIN/bin/llvm-strip ffmpeg
 
-      - name: Upload FFmpeg Executable
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FFmpeg-Master-Universal-Windows
-          path: ffmpeg_source/ffmpeg.exe
+          name: ffmpeg-android-monolithic
+          path: ffmpeg_source/ffmpeg
