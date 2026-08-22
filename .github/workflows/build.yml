@@ -1,4 +1,4 @@
-Name: Build FFmpeg Static Android ARM64 (Play Store Version)
+name: Build FFmpeg Static Android ARM64 (Play Store Version)
 
 on:
   workflow_dispatch:
