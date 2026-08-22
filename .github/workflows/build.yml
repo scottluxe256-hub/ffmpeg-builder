@@ -23,13 +23,12 @@ jobs:
 
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
 
-          # Daftarkan variabel lingkungan ke GITHUB_ENV agar berlaku di SEMUA step berikutnya
           echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
           echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
 
-          # Membuat Wrapper Symlink untuk Autotools & FFmpeg
+          # Wrapper symlink untuk autotools & configure FFmpeg
           mkdir -p $GITHUB_WORKSPACE/bin_wrapper
           cd $GITHUB_WORKSPACE/bin_wrapper
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar aarch64-linux-android-ar
@@ -65,33 +64,40 @@ jobs:
       - name: Build x265
         run: |
           git clone --depth 1 https://github.com/videolan/x265.git
-          cmake -G "Unix Makefiles" -S x265/source -B x265/build \
+          cmake -G "Ninja" -S x265/source -B x265/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON \
             -DENABLE_ASSEMBLY=OFF
-          cmake --build x265/build -j$(nproc)
-          cmake --install x265/build
+          ninja -C x265/build install
 
-          # Memastikan file x265.pc tidak 'terselip' di folder lib64
-          if [ -f "$INSTALL_DIR/lib64/pkgconfig/x265.pc" ]; then
-            mkdir -p $INSTALL_DIR/lib/pkgconfig
-            cp $INSTALL_DIR/lib64/pkgconfig/x265.pc $INSTALL_DIR/lib/pkgconfig/
-          fi
+          # Memaksa pembuatan x265.pc manual jika CMake melepasnya
+          mkdir -p $INSTALL_DIR/lib/pkgconfig
+          cat << 'EOF' > $INSTALL_DIR/lib/pkgconfig/x265.pc
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: x265
+Description: H.265/HEVC video encoder
+Version: 3.5
+Libs: -L${libdir} -lx265 -lc++_static -lc++abi -lm
+Cflags: -I${includedir}
+EOF
 
       - name: Build SVT-AV1
         run: |
           git clone --depth 1 --branch v4.2.0 https://gitlab.com/AOMediaCodec/SVT-AV1.git
-          cmake -G "Unix Makefiles" -S SVT-AV1 -B SVT-AV1/build \
+          cmake -G "Ninja" -S SVT-AV1 -B SVT-AV1/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
-          cmake --build SVT-AV1/build -j$(nproc)
-          cmake --install SVT-AV1/build
+          ninja -C SVT-AV1/build install
 
       # --- FFMPEG ---
 
@@ -102,10 +108,6 @@ jobs:
           git remote add origin https://github.com/FFmpeg/FFmpeg.git
           git fetch --depth 1 origin n9.0.1
           git checkout -q FETCH_HEAD
-
-          # Verifikasi file .pc sebelum configure
-          echo "=== Pkg-config Check ==="
-          pkg-config --list-all
 
           ./configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
