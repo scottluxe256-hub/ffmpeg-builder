@@ -60,7 +60,10 @@ jobs:
 
       - name: Build x265
         run: |
-          git clone --depth 1 --branch 4.3 https://github.com/videolan/x265.git
+          # Catatan: mirror videolan/x265 di GitHub ini tidak punya tag versi sama
+          # sekali (murni mirror commit dari Bitbucket), jadi tidak bisa di-pin
+          # pakai --branch seperti x265/FFmpeg lainnya. Clone HEAD apa adanya.
+          git clone --depth 1 https://github.com/videolan/x265.git
           # Pakai toolchain file RESMI dari NDK, bukan setting manual CMAKE_SYSTEM_NAME.
           # ENABLE_ASSEMBLY=OFF: assembly aarch64 x265 (ipfilter8.S dkk) tidak kompatibel
           # dengan integrated assembler Clang -> ini penyebab error kuning kamu kemarin.
@@ -126,8 +129,3 @@ jobs:
           name: ffmpeg-android-aarch64-static
           path: ffmpeg_source/ffmpeg
           
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-android-monolithic
-          path: ffmpeg_source/ffmpeg
