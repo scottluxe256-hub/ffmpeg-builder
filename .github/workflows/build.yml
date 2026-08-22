@@ -7,24 +7,80 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout FFmpeg Builds Repo
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          repository: BtbN/FFmpeg-Builds
-          ref: master
 
-      - name: Build Custom FFmpeg via Docker
+      - name: Install Build Dependencies
         run: |
-          # 1. Build image Docker pembuat FFmpeg
-          docker build -t ffmpeg-builder ./docker
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
+            git yasm nasm texinfo mingw-w64 g++-mingw-w64 cmake ninja-build
 
-          # 2. Jalankan kompilasi FFmpeg Windows 64-bit GPL (termasuk fdk-aac, x264, x265, svt-av1, QSV, NVENC, AMF)
-          docker run --rm -v ${{ github.workspace }}:/workspace ffmpeg-builder \
-            /workspace/build.sh target=win64 variant=gpl-shared-custom
+      - name: Set Environment Variables
+        run: |
+          echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> $GITHUB_ENV
 
-      - name: Upload FFmpeg Master Artifact
+      - name: Build libfdk-aac
+        run: |
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac
+          cd fdk-aac
+          ./autogen.sh
+          ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+      - name: Build x264
+        run: |
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git
+          cd x264
+          ./configure --host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32- --prefix=$INSTALL_DIR --enable-static --disable-cli
+          make -j$(nproc) && make install
+
+      - name: Build x265
+        run: |
+          git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git
+          cd x265_git/build/linux
+          cmake -G "Unix Makefiles" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DENABLE_SHARED=OFF ..
+          make -j$(nproc) && make install
+
+      - name: Build SVT-AV1
+        run: |
+          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
+          cd SVT-AV1/Build/linux
+          cmake -G "Unix Makefiles" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF ..
+          make -j$(nproc) && make install
+
+      - name: Build FFmpeg Git Master
+        run: |
+          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
+          cd ffmpeg_source
+          ./configure \
+            --enable-cross-compile \
+            --cross-prefix=x86_64-w64-mingw32- \
+            --arch=x86_64 \
+            --target-os=mingw32 \
+            --pkg-config=pkg-config \
+            --pkg-config-flags="--static" \
+            --extra-cflags="-I$INSTALL_DIR/include" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++" \
+            --prefix=$INSTALL_DIR \
+            --enable-static \
+            --disable-shared \
+            --enable-gpl \
+            --enable-nonfree \
+            --enable-libfdk-aac \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libsvtav1 \
+            --enable-amf \
+            --enable-ffnvcodec \
+            --enable-dxva2 \
+            --enable-d3d11va
+          make -j$(nproc)
+          x86_64-w64-mingw32-strip ffmpeg.exe
+
+      - name: Upload FFmpeg Executable
         uses: actions/upload-artifact@v4
         with:
           name: FFmpeg-Master-Universal-Windows
-          path: artifacts/*.zip
-          
+          path: ffmpeg_source/ffmpeg.exe
