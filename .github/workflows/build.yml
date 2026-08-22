@@ -24,9 +24,6 @@ jobs:
           echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
           echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> $GITHUB_ENV
 
-          # Wrapper ini hanya dibutuhkan oleh autotools (fdk-aac, x264) dan configure
-          # FFmpeg sendiri, yang masih mengharapkan nama tool bergaya "aarch64-linux-android-*".
-          # x265 & SVT-AV1 tidak butuh ini lagi karena sekarang pakai toolchain file resmi NDK.
           mkdir -p $GITHUB_WORKSPACE/bin_wrapper
           cd $GITHUB_WORKSPACE/bin_wrapper
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar aarch64-linux-android-ar
@@ -45,9 +42,6 @@ jobs:
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac
           cd fdk-aac
           ./autogen.sh
-          # fdk-aac sumbernya C++, jadi CXX WAJIB di-set juga -- kalau tidak,
-          # autotools jatuh ke g++ bawaan Ubuntu (x86_64) dan libfdk-aac.a yang
-          # dihasilkan jadi salah arsitektur meski proses build-nya "sukses".
           export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
           ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
@@ -64,18 +58,12 @@ jobs:
 
       - name: Build x265
         run: |
-          # Catatan: mirror videolan/x265 di GitHub ini tidak punya tag versi sama
-          # sekali (murni mirror commit dari Bitbucket), jadi tidak bisa di-pin
-          # pakai --branch seperti x265/FFmpeg lainnya. Clone HEAD apa adanya.
           git clone --depth 1 https://github.com/videolan/x265.git
-          # Pakai toolchain file RESMI dari NDK, bukan setting manual CMAKE_SYSTEM_NAME.
-          # ENABLE_ASSEMBLY=OFF: assembly aarch64 x265 (ipfilter8.S dkk) tidak kompatibel
-          # dengan integrated assembler Clang -> ini penyebab error kuning kamu kemarin.
-          # ffmpeg-kit sendiri mendokumentasikan hal yang sama dan mematikan asm x265 di arm64.
           cmake -G "Unix Makefiles" -S x265/source -B x265/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_INSTALL_LIBDIR=lib \
             -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON \
             -DENABLE_ASSEMBLY=OFF
           cmake --build x265/build -j$(nproc)
@@ -88,6 +76,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_INSTALL_LIBDIR=lib \
             -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           cmake --build SVT-AV1/build -j$(nproc)
           cmake --install SVT-AV1/build
@@ -96,15 +85,12 @@ jobs:
 
       - name: Build FFmpeg
         run: |
-          # git clone --depth 1 --branch <tag> gagal untuk annotated tag rilis FFmpeg
-          # (tag-nya ketarik salah, akhirnya checkout ke commit acak yang bikin
-          # configure gagal total). Pola fetch di bawah ini aman untuk shallow+tag.
           mkdir ffmpeg_source && cd ffmpeg_source
           git init -q
           git remote add origin https://github.com/FFmpeg/FFmpeg.git
           git fetch --depth 1 origin n9.0.1
           git checkout -q FETCH_HEAD
-          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig"
+          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig"
 
           ./configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
@@ -116,7 +102,7 @@ jobs:
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -static-libstdc++ -static-libgcc" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64 -static-libstdc++ -static-libgcc" \
             --extra-libs="-lm -ldl -lz -llog -landroid -pthread" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
@@ -131,7 +117,7 @@ jobs:
         run: |
           cd ffmpeg_source
           file ffmpeg
-          echo "---- NEEDED shared libraries (harus cuma library bawaan OS Android) ----"
+          echo "---- NEEDED shared libraries ----"
           $TOOLCHAIN/bin/llvm-readelf -d ffmpeg | grep -E "NEEDED|SONAME" || true
 
       - name: Upload Artifact
@@ -139,4 +125,3 @@ jobs:
         with:
           name: ffmpeg-android-aarch64-static
           path: ffmpeg_source/ffmpeg
-          
