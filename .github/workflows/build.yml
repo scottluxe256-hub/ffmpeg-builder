@@ -113,12 +113,13 @@ jobs:
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-ldflags="-L$INSTALL_DIR/lib -static-libstdc++ -static-libgcc" \
-            --extra-libs="-lm -ldl -lz -llog -landroid -lpthread" \
+            --extra-libs="-lm -ldl -lz -llog -landroid -pthread" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
             --enable-gpl --enable-nonfree \
             --enable-jni --enable-mediacodec \
-            --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1
+            --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 \
+          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
           make -j$(nproc)
           $TOOLCHAIN/bin/llvm-strip ffmpeg
 
@@ -134,3 +135,4 @@ jobs:
         with:
           name: ffmpeg-android-aarch64-static
           path: ffmpeg_source/ffmpeg
+          
