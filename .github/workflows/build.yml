@@ -7,32 +7,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout FFmpeg Builds Repo
         uses: actions/checkout@v4
+        with:
+          repository: BtbN/FFmpeg-Builds
+          ref: master
 
-      - name: Install Correct MinGW Dependencies
+      - name: Build Custom FFmpeg via Docker
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo libtool-bin mingw-w64 g++-mingw-w64 cmake ninja-build
+          # 1. Build image Docker pembuat FFmpeg
+          docker build -t ffmpeg-builder ./docker
 
-      - name: Build FFmpeg Git Master Universal
-        run: |
-          git clone https://github.com/rdp/ffmpeg-windows-build-helpers.git
-          cd ffmpeg-windows-build-helpers
-          
-          # Mengirim opsi otomatis ke skrip untuk menghindari flag yang tidak dikenal
-          ./cross_compile_ffmpeg.sh \
-            --build-ffmpeg-static=y \
-            --compiler-flavors=win64 \
-            --ffmpeg-git-checkout-version=master \
-            --sandbox-ok=y \
-            --custom-pfx-opt="--enable-gpl --enable-nonfree --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-amf --enable-ffnvcodec --enable-dxva2 --enable-d3d11va"
+          # 2. Jalankan kompilasi FFmpeg Windows 64-bit GPL (termasuk fdk-aac, x264, x265, svt-av1, QSV, NVENC, AMF)
+          docker run --rm -v ${{ github.workspace }}:/workspace ffmpeg-builder \
+            /workspace/build.sh target=win64 variant=gpl-shared-custom
 
       - name: Upload FFmpeg Master Artifact
         uses: actions/upload-artifact@v4
         with:
           name: FFmpeg-Master-Universal-Windows
-          path: |
-            ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg/ffmpeg.exe
-            
+          path: artifacts/*.zip
+          
