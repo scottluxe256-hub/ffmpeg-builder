@@ -45,7 +45,11 @@ jobs:
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac
           cd fdk-aac
           ./autogen.sh
+          # fdk-aac sumbernya C++, jadi CXX WAJIB di-set juga -- kalau tidak,
+          # autotools jatuh ke g++ bawaan Ubuntu (x86_64) dan libfdk-aac.a yang
+          # dihasilkan jadi salah arsitektur meski proses build-nya "sukses".
           export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
+          export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
           ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$(nproc) && make install
 
