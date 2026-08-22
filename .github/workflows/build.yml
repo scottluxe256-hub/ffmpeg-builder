@@ -63,6 +63,12 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF ..
           make -j$(nproc) && make install
 
+      - name: Install AMF Headers
+        run: |
+          git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git amf
+          mkdir -p $INSTALL_DIR/include/AMF
+          cp -r amf/amf/public/include/* $INSTALL_DIR/include/AMF/
+
       - name: Build FFmpeg Git Master
         run: |
           git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
@@ -100,3 +106,4 @@ jobs:
         with:
           name: FFmpeg-Master-Universal-Windows
           path: ffmpeg_source/ffmpeg.exe
+          
