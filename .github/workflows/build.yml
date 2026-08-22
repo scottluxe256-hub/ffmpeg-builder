@@ -10,11 +10,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies
+      - name: Install Correct MinGW Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo libtool-bin crossbuild-essential-mingw-w64 cmake ninja-build
+            git yasm nasm texinfo libtool-bin mingw-w64 g++-mingw-w64 cmake ninja-build
 
       - name: Build FFmpeg Git Master Universal
         run: |
@@ -37,3 +37,4 @@ jobs:
           name: FFmpeg-Master-Universal-Windows
           path: |
             ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg/ffmpeg.exe
+            
