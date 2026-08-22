@@ -73,20 +73,9 @@ jobs:
             -DENABLE_ASSEMBLY=OFF
           ninja -C x265/build install
 
-          # Memaksa pembuatan x265.pc manual jika CMake melepasnya
+          # Memaksa pembuatan x265.pc manual menggunakan printf (aman untuk sintaks YAML)
           mkdir -p $INSTALL_DIR/lib/pkgconfig
-          cat << 'EOF' > $INSTALL_DIR/lib/pkgconfig/x265.pc
-prefix=${pcfiledir}/../..
-exec_prefix=${prefix}
-libdir=${prefix}/lib
-includedir=${prefix}/include
-
-Name: x265
-Description: H.265/HEVC video encoder
-Version: 3.5
-Libs: -L${libdir} -lx265 -lc++_static -lc++abi -lm
-Cflags: -I${includedir}
-EOF
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
 
       - name: Build SVT-AV1
         run: |
