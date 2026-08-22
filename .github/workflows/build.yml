@@ -41,8 +41,13 @@ jobs:
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
           export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
-          ./configure --host=aarch64-linux-android --cross-prefix=$TOOLCHAIN/bin/aarch64-linux-android- \
-            --prefix=$INSTALL_DIR --enable-static --disable-shared --enable-pic --disable-cli
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export AS=$TOOLCHAIN/bin/llvm-as
+          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+          export STRINGS=$TOOLCHAIN/bin/llvm-strings
+          export STRIP=$TOOLCHAIN/bin/llvm-strip
+          ./configure --host=aarch64-linux-android --cross-prefix=$TOOLCHAIN/bin/llvm- \
+            --prefix=$INSTALL_DIR --enable-static --enable-pic --disable-cli
           make -j$(nproc) && make install
 
       - name: Build x265 (Static)
@@ -54,6 +59,7 @@ jobs:
             -DCMAKE_ANDROID_NDK=$NDK_PATH \
             -DCMAKE_C_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
             -DCMAKE_CXX_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
+            -DCMAKE_AR=$TOOLCHAIN/bin/llvm-ar -DCMAKE_RANLIB=$TOOLCHAIN/bin/llvm-ranlib \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON
           make -j$(nproc) && make install
@@ -68,6 +74,7 @@ jobs:
             -DCMAKE_ANDROID_NDK=$NDK_PATH \
             -DCMAKE_C_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
             -DCMAKE_CXX_COMPILER=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
+            -DCMAKE_AR=$TOOLCHAIN/bin/llvm-ar -DCMAKE_RANLIB=$TOOLCHAIN/bin/llvm-ranlib \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           make -j$(nproc) && make install
