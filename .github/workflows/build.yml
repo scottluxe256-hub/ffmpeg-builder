@@ -1,11 +1,28 @@
-name: Build FFmpeg Static Android ARM64 (Play Store Version)
+name: Build Full FFmpeg Static Android (Multi-ABI Play Store)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-android-static-playstore:
+  build-android-ffmpeg:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: "arm64-v8a"
+            arch: "aarch64"
+            cpu: "armv8-a"
+            target_host: "aarch64-linux-android"
+            api_level: "29"
+            artifact_name: "ffmpeg-android-aarch64-playstore"
+          - abi: "armeabi-v7a"
+            arch: "arm"
+            cpu: "armv7-a"
+            target_host: "armv7a-linux-androideabi"
+            api_level: "29"
+            artifact_name: "ffmpeg-android-armv7a-playstore"
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -14,40 +31,59 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo cmake ninja-build wget unzip
+            git yasm nasm texinfo cmake ninja-build wget unzip meson
 
       - name: Setup Environment & Android NDK r26b
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
           unzip -q android-ndk-r26b-linux.zip
 
-          INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
+          INSTALL_DIR="$GITHUB_WORKSPACE/build_assets_${{ matrix.arch }}"
 
           echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
           echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
 
-          # Wrapper symlink untuk autotools & configure FFmpeg
-          mkdir -p $GITHUB_WORKSPACE/bin_wrapper
-          cd $GITHUB_WORKSPACE/bin_wrapper
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar aarch64-linux-android-ar
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-as aarch64-linux-android-as
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ld aarch64-linux-android-ld
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm aarch64-linux-android-nm
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib aarch64-linux-android-ranlib
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip aarch64-linux-android-strip
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings aarch64-linux-android-strings
-          echo "$GITHUB_WORKSPACE/bin_wrapper" >> $GITHUB_PATH
+          # Set Clang compiler per ABI
+          if [ "${{ matrix.arch }}" = "arm" ]; then
+            echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api_level }}-clang" >> $GITHUB_ENV
+            echo "TARGET_CXX=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api_level }}-clang++" >> $GITHUB_ENV
+            echo "CROSS_PREFIX=arm-linux-androideabi-" >> $GITHUB_ENV
+          else
+            echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api_level }}-clang" >> $GITHUB_ENV
+            echo "TARGET_CXX=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api_level }}-clang++" >> $GITHUB_ENV
+            echo "CROSS_PREFIX=aarch64-linux-android-" >> $GITHUB_ENV
+          fi
 
-      # --- LIBRARIES (Tanpa libfdk-aac) ---
+          # Wrapper symlinks
+          mkdir -p $GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}
+          cd $GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar ${{ matrix.target_host }}-ar || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-as ${{ matrix.target_host }}-as || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ld ${{ matrix.target_host }}-ld || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm ${{ matrix.target_host }}-nm || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib ${{ matrix.target_host }}-ranlib || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip ${{ matrix.target_host }}-strip || true
+          echo "$GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}" >> $GITHUB_PATH
+
+      # --- LIBRARIES ---
+
+      - name: Build libopus
+        run: |
+          git clone --depth 1 https://github.com/xiph/opus.git
+          cd opus
+          ./autogen.sh
+          export CC=$TARGET_CLANG
+          ./configure --host=${{ matrix.target_host }} --prefix=$INSTALL_DIR --enable-static --disable-shared
+          make -j$(nproc) && make install
 
       - name: Build x264
         run: |
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
-          export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
-          ./configure --host=aarch64-linux-android --cross-prefix=aarch64-linux-android- \
+          export CC=$TARGET_CLANG
+          ./configure --host=${{ matrix.target_host }} --cross-prefix=$CROSS_PREFIX \
             --prefix=$INSTALL_DIR --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
           make -j$(nproc) && make install
 
@@ -56,14 +92,13 @@ jobs:
           git clone --depth 1 https://github.com/videolan/x265.git
           cmake -G "Ninja" -S x265/source -B x265/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-${{ matrix.api_level }} \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON \
             -DENABLE_ASSEMBLY=OFF
           ninja -C x265/build install
 
-          # Memaksa pembuatan x265.pc manual
           mkdir -p $INSTALL_DIR/lib/pkgconfig
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
 
@@ -72,11 +107,29 @@ jobs:
           git clone --depth 1 --branch v4.2.0 https://gitlab.com/AOMediaCodec/SVT-AV1.git
           cmake -G "Ninja" -S SVT-AV1 -B SVT-AV1/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-${{ matrix.api_level }} \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           ninja -C SVT-AV1/build install
+
+      - name: Build libvpx (VP8/VP9)
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx
+          cd libvpx
+          export CC=$TARGET_CLANG
+          export CXX=$TARGET_CXX
+          
+          if [ "${{ matrix.arch }}" = "arm" ]; then
+            VPX_TARGET="armv7-android-gcc"
+          else
+            VPX_TARGET="arm64-android-gcc"
+          fi
+
+          ./configure --target=$VPX_TARGET --prefix=$INSTALL_DIR \
+            --enable-pic --disable-examples --disable-unit-tests --enable-vp8 --enable-vp9 \
+            --disable-shared --enable-static --as=yasm
+          make -j$(nproc) && make install
 
       # --- FFMPEG ---
 
@@ -89,12 +142,12 @@ jobs:
           git checkout -q FETCH_HEAD
 
           ./configure \
-            --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
-            --cc=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
-            --cxx=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
-            --ar=aarch64-linux-android-ar \
-            --ranlib=aarch64-linux-android-ranlib \
-            --strip=aarch64-linux-android-strip \
+            --target-os=android --arch=${{ matrix.arch }} --cpu=${{ matrix.cpu }} --enable-cross-compile \
+            --cc=$TARGET_CLANG \
+            --cxx=$TARGET_CXX \
+            --ar=${{ matrix.target_host }}-ar \
+            --ranlib=${{ matrix.target_host }}-ranlib \
+            --strip=${{ matrix.target_host }}-strip \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
@@ -104,7 +157,7 @@ jobs:
             --enable-static --disable-shared \
             --enable-gpl \
             --enable-jni --enable-mediacodec \
-            --enable-libx264 --enable-libx265 --enable-libsvtav1 \
+            --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvpx --enable-libopus \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$(nproc)
@@ -120,5 +173,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-aarch64-playstore
+          name: ${{ matrix.artifact_name }}
           path: ffmpeg_source/ffmpeg
