@@ -90,6 +90,7 @@ jobs:
           git remote add origin https://github.com/FFmpeg/FFmpeg.git
           git fetch --depth 1 origin n9.0.1
           git checkout -q FETCH_HEAD
+
           export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig"
 
           ./configure \
@@ -102,14 +103,15 @@ jobs:
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64 -static-libstdc++ -static-libgcc" \
-            --extra-libs="-lm -ldl -lz -llog -landroid -pthread" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
+            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
             --enable-gpl --enable-nonfree \
             --enable-jni --enable-mediacodec \
             --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
+
           make -j$(nproc)
           $TOOLCHAIN/bin/llvm-strip ffmpeg
 
