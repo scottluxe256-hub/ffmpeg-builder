@@ -92,8 +92,14 @@ jobs:
 
       - name: Build FFmpeg
         run: |
-          git clone --depth 1 --branch n9.0.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg_source
-          cd ffmpeg_source
+          # git clone --depth 1 --branch <tag> gagal untuk annotated tag rilis FFmpeg
+          # (tag-nya ketarik salah, akhirnya checkout ke commit acak yang bikin
+          # configure gagal total). Pola fetch di bawah ini aman untuk shallow+tag.
+          mkdir ffmpeg_source && cd ffmpeg_source
+          git init -q
+          git remote add origin https://github.com/FFmpeg/FFmpeg.git
+          git fetch --depth 1 origin n9.0.1
+          git checkout -q FETCH_HEAD
           export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig"
 
           ./configure \
@@ -128,4 +134,3 @@ jobs:
         with:
           name: ffmpeg-android-aarch64-static
           path: ffmpeg_source/ffmpeg
-          
