@@ -1,10 +1,10 @@
-name: Build FFmpeg Static Android (ARMv7 Only)
+Name: Build FFmpeg Master Universal Windows
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-android-armv7:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -14,148 +14,104 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo cmake ninja-build wget unzip meson
+            git yasm nasm texinfo mingw-w64 g++-mingw-w64 cmake ninja-build
 
-      - name: Setup Environment & Android NDK r26b
+      - name: Set Environment Variables
         run: |
-          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
-          unzip -q android-ndk-r26b-linux.zip
-
-          INSTALL_DIR="$GITHUB_WORKSPACE/build_assets_arm"
-
-          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
-          echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
-          echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
-
-          # Compiler Clang & Prefix ARMv7
-          echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi29-clang" >> $GITHUB_ENV
-          echo "TARGET_CXX=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi29-clang++" >> $GITHUB_ENV
-          echo "CROSS_PREFIX=armv7a-linux-androideabi-" >> $GITHUB_ENV
-
-          # Wrapper symlinks khusus ARMv7
-          mkdir -p $GITHUB_WORKSPACE/bin_wrapper_arm
-          cd $GITHUB_WORKSPACE/bin_wrapper_arm
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar armv7a-linux-androideabi-ar || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-as armv7a-linux-androideabi-as || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ld armv7a-linux-androideabi-ld || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm armv7a-linux-androideabi-nm || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib armv7a-linux-androideabi-ranlib || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip armv7a-linux-androideabi-strip || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings armv7a-linux-androideabi-strings || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings arm-linux-androideabi-strings || true
-
-          echo "$GITHUB_WORKSPACE/bin_wrapper_arm" >> $GITHUB_PATH
-
-      # --- LIBRARIES ---
+          echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Build libfdk-aac
         run: |
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac
           cd fdk-aac
           ./autogen.sh
-          export CC=$TARGET_CLANG
-          export CXX=$TARGET_CXX
-          ./configure --host=armv7a-linux-androideabi --prefix=$INSTALL_DIR --enable-static --disable-shared
-          make -j$(nproc) && make install
-
-      - name: Build libopus
-        run: |
-          git clone --depth 1 https://github.com/xiph/opus.git
-          cd opus
-          ./autogen.sh
-          export CC=$TARGET_CLANG
-          ./configure --host=armv7a-linux-androideabi --prefix=$INSTALL_DIR --enable-static --disable-shared
+          ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$(nproc) && make install
 
       - name: Build x264
         run: |
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
-          export CC=$TARGET_CLANG
-          ./configure --host=armv7a-linux-androideabi --cross-prefix=$CROSS_PREFIX \
-            --prefix=$INSTALL_DIR --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
+          ./configure --host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32- --prefix=$INSTALL_DIR --enable-static --disable-cli
           make -j$(nproc) && make install
 
       - name: Build x265
         run: |
-          git clone --depth 1 https://github.com/videolan/x265.git
-          cmake -G "Ninja" -S x265/source -B x265/build \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=armeabi-v7a -DANDROID_PLATFORM=android-29 \
+          git clone https://github.com/videolan/x265.git
+          cd x265/source
+          cmake -G "Unix Makefiles" \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON \
-            -DENABLE_ASSEMBLY=OFF
-          ninja -C x265/build install
-
-          mkdir -p $INSTALL_DIR/lib/pkgconfig
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
+            -DENABLE_SHARED=OFF \
+            -DENABLE_CLI=OFF \
+            -DEXPORT_C_API=ON
+          make -j$(nproc) && make install
 
       - name: Build SVT-AV1
         run: |
-          git clone --depth 1 --branch v4.2.0 https://gitlab.com/AOMediaCodec/SVT-AV1.git
-          cmake -G "Ninja" -S SVT-AV1 -B SVT-AV1/build \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=armeabi-v7a -DANDROID_PLATFORM=android-29 \
+          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
+          cd SVT-AV1
+          mkdir build && cd build
+          cmake -G "Unix Makefiles" \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
-          ninja -C SVT-AV1/build install
-
-      - name: Build libvpx (VP8/VP9)
-        run: |
-          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx
-          cd libvpx
-          export CC=$TARGET_CLANG
-          export CXX=$TARGET_CXX
-
-          ./configure --target=armv7-android-gcc --prefix=$INSTALL_DIR \
-            --enable-pic --disable-examples --disable-unit-tests --enable-vp8 --enable-vp9 \
-            --disable-shared --enable-static --disable-as
+            -DBUILD_SHARED_LIBS=OFF ..
           make -j$(nproc) && make install
 
-      # --- FFMPEG ---
-
-      - name: Build FFmpeg
+      - name: Install AMF Headers (AMD GPU)
         run: |
-          mkdir ffmpeg_source && cd ffmpeg_source
-          git init -q
-          git remote add origin https://github.com/FFmpeg/FFmpeg.git
-          git fetch --depth 1 origin n9.0.1
-          git checkout -q FETCH_HEAD
+          git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git amf
+          mkdir -p $INSTALL_DIR/include/AMF
+          cp -r amf/amf/public/include/* $INSTALL_DIR/include/AMF/
 
-          ./configure \
-            --target-os=android --arch=arm --cpu=armv7-a --enable-cross-compile \
-            --cc=$TARGET_CLANG \
-            --cxx=$TARGET_CXX \
-            --ar=armv7a-linux-androideabi-ar \
-            --ranlib=armv7a-linux-androideabi-ranlib \
-            --strip=armv7a-linux-androideabi-strip \
-            --pkg-config=pkg-config --pkg-config-flags="--static" \
-            --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
-            --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
-            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread" \
-            --prefix=$INSTALL_DIR \
-            --enable-static --disable-shared \
-            --enable-gpl --enable-nonfree \
-            --enable-jni --enable-mediacodec \
-            --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvpx --enable-libopus \
-          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
-
-          make -j$(nproc)
-          $TOOLCHAIN/bin/llvm-strip ffmpeg
-
-      - name: Verify Binary Dependencies
+      - name: Install NVENC Headers (Nvidia GPU - ffnvcodec)
         run: |
+          git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git
+          cd nv-codec-headers
+          make PREFIX=$INSTALL_DIR install
+
+      - name: Build FFmpeg Git Master
+        run: |
+          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
           cd ffmpeg_source
-          file ffmpeg
-          echo "---- NEEDED shared libraries ----"
-          $TOOLCHAIN/bin/llvm-readelf -d ffmpeg | grep -E "NEEDED|SONAME" || true
+          
+          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$PKG_CONFIG_PATH"
+          
+          # Penambahan flag -static murni dan -Wl,-Bstatic mengunci semua DLL C/C++ ke dalam biner .exe
+          ./configure \
+            --enable-cross-compile \
+            --cross-prefix=x86_64-w64-mingw32- \
+            --arch=x86_64 \
+            --target-os=mingw32 \
+            --pkg-config=pkg-config \
+            --pkg-config-flags="--static" \
+            --extra-cflags="-I$INSTALL_DIR/include" \
+            --extra-cxxflags="-I$INSTALL_DIR/include" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++ -Wl,-Bstatic" \
+            --extra-libs="-lstdc++ -lpthread" \
+            --prefix=$INSTALL_DIR \
+            --enable-static \
+            --disable-shared \
+            --enable-gpl \
+            --enable-nonfree \
+            --enable-libfdk-aac \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libsvtav1 \
+            --enable-amf \
+            --enable-ffnvcodec \
+            --enable-dxva2 \
+            --enable-d3d11va
+          make -j$(nproc)
+          x86_64-w64-mingw32-strip ffmpeg.exe
 
-      - name: Upload Artifact
+      - name: Upload FFmpeg Executable
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-armv7a-fdkaac
-          path: ffmpeg_source/ffmpeg
+          name: FFmpeg-Master-Universal-Windows
+          path: ffmpeg_source/ffmpeg.exe
