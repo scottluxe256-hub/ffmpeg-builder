@@ -1,4 +1,4 @@
-Name: Build FFmpeg Master Universal Windows
+name: Build FFmpeg Master Universal Windows Static
 
 on:
   workflow_dispatch:
@@ -27,6 +27,30 @@ jobs:
           cd fdk-aac
           ./autogen.sh
           ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+      - name: Build libopus
+        run: |
+          git clone --depth 1 https://github.com/xiph/opus.git
+          cd opus
+          ./autogen.sh
+          ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+      - name: Build libvpx
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx
+          cd libvpx
+          CROSS=x86_64-w64-mingw32- ./configure \
+            --target=x86_64-win64-gcc \
+            --prefix=$INSTALL_DIR \
+            --enable-static \
+            --disable-shared \
+            --disable-examples \
+            --disable-unit-tests \
+            --enable-vp8 \
+            --enable-vp9 \
+            --enable-vp9-highbitdepth
           make -j$(nproc) && make install
 
       - name: Build x264
@@ -63,12 +87,6 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF ..
           make -j$(nproc) && make install
 
-      - name: Install AMF Headers (AMD GPU)
-        run: |
-          git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git amf
-          mkdir -p $INSTALL_DIR/include/AMF
-          cp -r amf/amf/public/include/* $INSTALL_DIR/include/AMF/
-
       - name: Install NVENC Headers (Nvidia GPU - ffnvcodec)
         run: |
           git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git
@@ -82,7 +100,6 @@ jobs:
           
           export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$PKG_CONFIG_PATH"
           
-          # Penambahan flag -static murni dan -Wl,-Bstatic mengunci semua DLL C/C++ ke dalam biner .exe
           ./configure \
             --enable-cross-compile \
             --cross-prefix=x86_64-w64-mingw32- \
@@ -91,20 +108,22 @@ jobs:
             --pkg-config=pkg-config \
             --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include" \
-            --extra-cxxflags="-I$INSTALL_DIR/include" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++ -Wl,-Bstatic" \
-            --extra-libs="-lstdc++ -lpthread" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++" \
+            --extra-libs="-lstdc++ -lpthread -lregex" \
             --prefix=$INSTALL_DIR \
             --enable-static \
             --disable-shared \
             --enable-gpl \
             --enable-nonfree \
             --enable-libfdk-aac \
+            --enable-libopus \
+            --enable-libvpx \
             --enable-libx264 \
             --enable-libx265 \
             --enable-libsvtav1 \
-            --enable-amf \
             --enable-ffnvcodec \
+            --enable-nvenc \
+            --enable-nvdec \
             --enable-dxva2 \
             --enable-d3d11va
           make -j$(nproc)
