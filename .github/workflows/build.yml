@@ -29,7 +29,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/build_assets
-          key: ${{ runner.os }}-ffmpeg-assets-v2
+          key: ${{ runner.os }}-ffmpeg-assets-v3
 
       - name: Build libfdk-aac
         if: steps.cache-assets.outputs.cache-hit != 'true'
@@ -77,9 +77,10 @@ jobs:
       - name: Build x265
         if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 https://github.com/videolan/x265.git
-          cd x265/source
-          cmake -G "Ninja" \
+          git clone https://github.com/videolan/x265.git
+          cd x265
+          mkdir -p build && cd build
+          cmake -G "Ninja" ../source \
             -DCMAKE_SYSTEM_NAME=Windows \
             -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
             -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
@@ -146,7 +147,7 @@ jobs:
 
       - name: Print Config Log on Failure
         if: failure()
-        run: cat ffmpeg_source/ffbuild/config.log
+        run: test -f ffmpeg_source/ffbuild/config.log && cat ffmpeg_source/ffbuild/config.log || echo "Config log not found."
 
       - name: Upload FFmpeg Executable
         uses: actions/upload-artifact@v4
