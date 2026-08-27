@@ -1,11 +1,14 @@
-name: Build FFmpeg Master Universal Windows Static
+name: Build FFmpeg Master Universal Windows Static (Fast)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
+    # Jika kuota Enterprise Larger Runner aktif, gunakan ubuntu-latest-16core atau ubuntu-24.04
+    # Jika tidak, tetap gunakan ubuntu-latest (4 vCPU standar)
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -14,14 +17,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo mingw-w64 g++-mingw-w64 cmake ninja-build
+            git yasm nasm texinfo mingw-w64 g++-mingw-w64 cmake ninja-build ccache
 
       - name: Set Environment Variables
         run: |
           echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> $GITHUB_ENV
 
+      # Cache folder library yang sudah jadi (Saves ~10-15 menit)
+      - name: Cache Build Assets
+        id: cache-assets
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/build_assets
+          key: ${{ runner.os }}-ffmpeg-assets-v1
+
       - name: Build libfdk-aac
+        if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac
           cd fdk-aac
@@ -30,6 +42,7 @@ jobs:
           make -j$(nproc) && make install
 
       - name: Build libopus
+        if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/xiph/opus.git
           cd opus
@@ -38,6 +51,7 @@ jobs:
           make -j$(nproc) && make install
 
       - name: Build libvpx
+        if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://chromium.googlesource.com/webm/libvpx
           cd libvpx
@@ -54,6 +68,7 @@ jobs:
           make -j$(nproc) && make install
 
       - name: Build x264
+        if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
@@ -61,10 +76,11 @@ jobs:
           make -j$(nproc) && make install
 
       - name: Build x265
+        if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
-          git clone https://github.com/videolan/x265.git
+          git clone --depth 1 https://github.com/videolan/x265.git
           cd x265/source
-          cmake -G "Unix Makefiles" \
+          cmake -G "Ninja" \
             -DCMAKE_SYSTEM_NAME=Windows \
             -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
             -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
@@ -72,22 +88,24 @@ jobs:
             -DENABLE_SHARED=OFF \
             -DENABLE_CLI=OFF \
             -DEXPORT_C_API=ON
-          make -j$(nproc) && make install
+          ninja -j$(nproc) && ninja install
 
       - name: Build SVT-AV1
+        if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
           cd SVT-AV1
           mkdir build && cd build
-          cmake -G "Unix Makefiles" \
+          cmake -G "Ninja" \
             -DCMAKE_SYSTEM_NAME=Windows \
             -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
             -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DBUILD_SHARED_LIBS=OFF ..
-          make -j$(nproc) && make install
+          ninja -j$(nproc) && ninja install
 
       - name: Install NVENC Headers (Nvidia GPU - ffnvcodec)
+        if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git
           cd nv-codec-headers
@@ -107,9 +125,9 @@ jobs:
             --target-os=mingw32 \
             --pkg-config=pkg-config \
             --pkg-config-flags="--static" \
-            --extra-cflags="-I$INSTALL_DIR/include" \
+            --extra-cflags="-I$INSTALL_DIR/include -static" \
             --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++" \
-            --extra-libs="-lstdc++ -lpthread -lregex" \
+            --extra-libs="-lstdc++ -lpthread" \
             --prefix=$INSTALL_DIR \
             --enable-static \
             --disable-shared \
