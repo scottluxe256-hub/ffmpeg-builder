@@ -1,12 +1,10 @@
-name: Build FFmpeg Master Universal Windows Static (Fast)
+name: Build FFmpeg Master Universal Windows Static (Fast & Fixed)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    # Jika kuota Enterprise Larger Runner aktif, gunakan ubuntu-latest-16core atau ubuntu-24.04
-    # Jika tidak, tetap gunakan ubuntu-latest (4 vCPU standar)
     runs-on: ubuntu-latest
 
     steps:
@@ -23,14 +21,15 @@ jobs:
         run: |
           echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_LIBDIR=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> $GITHUB_ENV
 
-      # Cache folder library yang sudah jadi (Saves ~10-15 menit)
+      # Cache folder library static agar tidak perlu compile ulang
       - name: Cache Build Assets
         id: cache-assets
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/build_assets
-          key: ${{ runner.os }}-ffmpeg-assets-v1
+          key: ${{ runner.os }}-ffmpeg-assets-v2
 
       - name: Build libfdk-aac
         if: steps.cache-assets.outputs.cache-hit != 'true'
@@ -116,8 +115,6 @@ jobs:
           git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
           cd ffmpeg_source
           
-          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$PKG_CONFIG_PATH"
-          
           ./configure \
             --enable-cross-compile \
             --cross-prefix=x86_64-w64-mingw32- \
@@ -125,10 +122,10 @@ jobs:
             --target-os=mingw32 \
             --pkg-config=pkg-config \
             --pkg-config-flags="--static" \
-            --extra-cflags="-I$INSTALL_DIR/include -static" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++" \
-            --extra-libs="-lstdc++ -lpthread" \
             --prefix=$INSTALL_DIR \
+            --extra-cflags="-I$INSTALL_DIR/include" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++" \
+            --extra-libs="-lstdc++ -lwinpthread -lm" \
             --enable-static \
             --disable-shared \
             --enable-gpl \
@@ -146,6 +143,10 @@ jobs:
             --enable-d3d11va
           make -j$(nproc)
           x86_64-w64-mingw32-strip ffmpeg.exe
+
+      - name: Print Config Log on Failure
+        if: failure()
+        run: cat ffmpeg_source/ffbuild/config.log
 
       - name: Upload FFmpeg Executable
         uses: actions/upload-artifact@v4
