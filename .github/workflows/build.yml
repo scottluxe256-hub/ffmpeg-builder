@@ -26,9 +26,15 @@ jobs:
 
       - name: Setup Environment & Android NDK r26b
         run: |
-          if [ "${{ steps.cache-ndk.outputs.cache-hit }}" != "true" ]; then
+          # Perbaikan Logika: Jika cache tidak ditemukan, unduh DAN ekstrak NDK-nya
+          if [ "${{ steps.cache-ndk.outputs.cache-hit }}" != 'true' ]; then
+            echo "Cache NDK tidak ditemukan. Memulai proses unduhan..."
             wget -q https://google.com
+            echo "Mengunduh selesai. Memulai ekstraksi..."
             unzip -q android-ndk-r26b-linux.zip
+            echo "Ekstraksi selesai."
+          else
+            echo "Cache NDK ditemukan! Melewati proses unduhan dan ekstraksi."
           fi
 
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets_aarch64"
