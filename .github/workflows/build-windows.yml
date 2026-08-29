@@ -197,7 +197,7 @@ jobs:
             $INSTALL_DIR/lib/libavfilter.a \
             $INSTALL_DIR/lib/libswscale.a \
             -L$INSTALL_DIR/lib \
-            -lstdc++ -lwinmm -lws2_32 -lbcrypt -lole32 -luser32
+            -lstdc++ -lpthread -lwinmm -lws2_32 -lbcrypt -lole32 -luser32
 
           $STRIP $GITHUB_WORKSPACE/output_win64/ffmpeg.dll
 
