@@ -2,20 +2,44 @@
 #include <windows.h>
 #include <stdio.h>
 
-// Fungsi JNI untuk memuat plugin libfdk_aac.dll secara dinamis di Windows
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+ * Class:     com_ffmpeg_compressor_engine_FFmpegNative
+ * Method:    loadFdkPlugin
+ * Signature: (Ljava/lang/String;)Z
+ */
 JNIEXPORT jboolean JNICALL
 Java_com_ffmpeg_compressor_engine_FFmpegNative_loadFdkPlugin(JNIEnv *env, jobject thiz, jstring pluginPath) {
-    const char *path = (*env)->GetStringUTFChars(env, pluginPath, 0);
-
-    // Memuat DLL eksternal ke RAM Windows secara runtime
-    HMODULE hModule = LoadLibraryA(path);
-    (*env)->ReleaseStringUTFChars(env, pluginPath, path);
-
-    if (!hModule) {
-        printf("Gagal memuat libfdk_aac.dll! Error Code: %lu\n", GetLastError());
+    if (pluginPath == NULL) {
         return JNI_FALSE;
     }
 
-    printf("Berhasil memuat libfdk_aac.dll ke RAM Windows!\n");
+    const char *path = (*env)->GetStringUTFChars(env, pluginPath, NULL);
+    if (path == NULL) {
+        return JNI_FALSE; // Out of memory
+    }
+
+    // Load DLL plugin secara dinamis ke dalam process RAM Windows
+    HMODULE hModule = LoadLibraryA(path);
+    
+    // Bebaskan memory string JNI
+    (*env)->ReleaseStringUTFChars(env, pluginPath, path);
+
+    if (!hModule) {
+        DWORD errCode = GetLastError();
+        char errBuff[256];
+        snprintf(errBuff, sizeof(errBuff), "[FFmpegJNI Error] Gagal load DLL. Code: %lu\n", errCode);
+        OutputDebugStringA(errBuff); // Muncul di Debugger Windows / Visual Studio Log
+        return JNI_FALSE;
+    }
+
+    OutputDebugStringA("[FFmpegJNI Success] Berhasil memuat libfdk_aac.dll!\n");
     return JNI_TRUE;
 }
+
+#ifdef __cplusplus
+}
+#endif
