@@ -70,8 +70,10 @@ jobs:
           
           echo "$GITHUB_WORKSPACE/bin_wrapper_aarch64" >> $GITHUB_PATH
 
-      - name: Build LCEVC Integration Layer (EIL)
+            - name: Build LCEVC Integration Layer (EIL)
         run: |
+          echo "Memulai kloning pustaka LCEVC EIL resmi..."
+          # Perbaikan Utama: Mengembalikan URL repositori yang terpotong
           git clone --depth 1 https://github.com
           cd lcevc-eil
           mkdir build && cd build
