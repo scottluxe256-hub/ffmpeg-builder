@@ -15,21 +15,30 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo cmake ninja-build wget unzip meson
+            git yasm nasm texinfo cmake ninja-build wget unzip meson curl
 
       - name: Cache Android NDK
         id: cache-ndk
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/android-ndk-r26b
-          key: ${{ runner.os }}-ndk-r26b-v2
+          key: ${{ runner.os }}-ndk-r26b-v3
 
       - name: Download & Extract NDK if Cache Miss
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
-          echo "Cache NDK tidak ditemukan! Memulai proses unduhan..."
-          wget -q https://google.com
-          echo "Unduhan selesai. Mengekstrak berkas..."
+          echo "Cache NDK tidak ditemukan! Memulai unduhan via Curl..."
+          
+          # Menggunakan Curl dengan fitur retry otomatis 5 kali jika jaringan intermiten
+          curl -L --retry 5 --retry-delay 5 -o android-ndk-r26b-linux.zip https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          
+          # Cek validasi keberadaan berkas sebelum diekstrak
+          if [ ! -f "android-ndk-r26b-linux.zip" ] || [ ! -s "android-ndk-r26b-linux.zip" ]; then
+            echo "EROR KRITIS: Berkas android-ndk-r26b-linux.zip gagal terunduh secara utuh!"
+            exit 1
+          fi
+          
+          echo "Unduhan terverifikasi sukses. Mengekstrak berkas..."
           unzip -q android-ndk-r26b-linux.zip
           rm -f android-ndk-r26b-linux.zip
           echo "Folder NDK siap digunakan."
