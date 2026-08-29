@@ -81,12 +81,16 @@ jobs:
           ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-cli
           make -j$JOBS && make install
 
-      # 4. BUILD X265 STATIC (WIN64 - FIX GIT VERSION & CMAKE ERROR)
+      # 4. BUILD X265 STATIC (WIN64 - FIX CMAKE ERROR PERMANEN)
       - name: Build x265
         run: |
           cd $WORKSPACE
-          git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git x265
+          # Clone repository x265 (Clone utuh agar tag terdeteksi sempurna)
+          git clone https://bitbucket.org/multicoreware/x265_git.git x265
           
+          # Injeksi versi manual jika git version gagal
+          echo "3.5" > x265/source/VERSION
+
           # Buat Toolchain File CMake MinGW Manual
           cat << 'EOF' > $WORKSPACE/mingw_toolchain.cmake
           set(CMAKE_SYSTEM_NAME Windows)
@@ -103,7 +107,6 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/mingw_toolchain.cmake \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_INSTALL_LIBDIR=lib \
-            -DX265_LATEST_TAG="3.5" \
             -DENABLE_SHARED=OFF \
             -DENABLE_CLI=OFF \
             -DEXPORT_C_API=ON \
@@ -175,19 +178,19 @@ jobs:
           $TARGET_CC -shared -o $GITHUB_WORKSPACE/output_win64/ffmpeg.dll \
             $GITHUB_WORKSPACE/jni/ffmpeg_win_jni.c \
             -I$INSTALL_DIR/include \
-            -Wl,--start-group \
+            -Wl,--whole-archive \
             $INSTALL_DIR/lib/libavformat.a \
             $INSTALL_DIR/lib/libavcodec.a \
-            $INSTALL_DIR/lib/libavfilter.a \
             $INSTALL_DIR/lib/libavutil.a \
-            $INSTALL_DIR/lib/libswscale.a \
             $INSTALL_DIR/lib/libswresample.a \
             $INSTALL_DIR/lib/libx264.a \
             $INSTALL_DIR/lib/libx265.a \
             $INSTALL_DIR/lib/libSvtAv1Enc.a \
             $INSTALL_DIR/lib/libvpx.a \
             $INSTALL_DIR/lib/libopus.a \
-            -Wl,--end-group \
+            -Wl,--no-whole-archive \
+            $INSTALL_DIR/lib/libavfilter.a \
+            $INSTALL_DIR/lib/libswscale.a \
             -L$INSTALL_DIR/lib \
             -lstdc++ -lwinmm -lws2_32 -lbcrypt -lole32 -luser32
 
