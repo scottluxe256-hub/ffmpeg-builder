@@ -11,6 +11,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Setup Java JDK (For jni.h Header)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Maximize RAM Disk Build Space
         run: |
           sudo mkdir -p /dev/shm/build_space
@@ -81,17 +87,13 @@ jobs:
           ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-cli
           make -j$JOBS && make install
 
-      # 4. BUILD X265 STATIC (WIN64 - FIX CMAKE ERROR PERMANEN)
+      # 4. BUILD X265 STATIC (WIN64)
       - name: Build x265
         run: |
           cd $WORKSPACE
-          # Clone repository x265 (Clone utuh agar tag terdeteksi sempurna)
           git clone https://bitbucket.org/multicoreware/x265_git.git x265
-          
-          # Injeksi versi manual jika git version gagal
           echo "3.5" > x265/source/VERSION
 
-          # Buat Toolchain File CMake MinGW Manual
           cat << 'EOF' > $WORKSPACE/mingw_toolchain.cmake
           set(CMAKE_SYSTEM_NAME Windows)
           set(CMAKE_SYSTEM_PROCESSOR x86_64)
@@ -177,6 +179,9 @@ jobs:
           
           $TARGET_CC -shared -o $GITHUB_WORKSPACE/output_win64/ffmpeg.dll \
             $GITHUB_WORKSPACE/jni/ffmpeg_win_jni.c \
+            -I$JAVA_HOME/include \
+            -I$JAVA_HOME/include/linux \
+            -I$JAVA_HOME/include/win32 \
             -I$INSTALL_DIR/include \
             -Wl,--whole-archive \
             $INSTALL_DIR/lib/libavformat.a \
