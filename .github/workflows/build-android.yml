@@ -86,7 +86,7 @@ jobs:
       - name: Build libopus (Master)
         run: |
           cd $WORKSPACE
-          git clone --depth 1 https://xiph/opus.git || git clone --depth 1 https://github.com/xiph/opus.git
+          git clone --depth 1 https://github.com/xiph/opus.git
           cd opus
           ./autogen.sh
           export CC=$TARGET_CLANG
@@ -183,7 +183,7 @@ jobs:
           $TARGET_CLANG -shared -o $GITHUB_WORKSPACE/output_binaries/libffmpeg.so \
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
             -I$INSTALL_DIR/include \
-            -Wl,--whole-archive \
+            -Wl,--start-group \
             $INSTALL_DIR/lib/libavformat.a \
             $INSTALL_DIR/lib/libavcodec.a \
             $INSTALL_DIR/lib/libavfilter.a \
@@ -195,7 +195,7 @@ jobs:
             $INSTALL_DIR/lib/libSvtAv1Enc.a \
             $INSTALL_DIR/lib/libvpx.a \
             $INSTALL_DIR/lib/libopus.a \
-            -Wl,--no-whole-archive \
+            -Wl,--end-group \
             -L$INSTALL_DIR/lib \
             -lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread
 
@@ -206,4 +206,3 @@ jobs:
         with:
           name: ffmpeg-and-plugins-arm64
           path: output_binaries/*
-          
