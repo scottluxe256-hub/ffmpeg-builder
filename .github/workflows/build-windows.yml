@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
             git yasm nasm texinfo cmake ninja-build wget unzip meson curl \
-            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 mingw-w64-tools
+            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 mingw-w64-tools mingw-w64-x86-64-dev
 
       - name: Setup Windows MinGW Environment Variables
         run: |
@@ -46,8 +46,19 @@ jobs:
           echo "RANLIB=x86_64-w64-mingw32-ranlib" >> $GITHUB_ENV
           echo "STRIP=x86_64-w64-mingw32-strip" >> $GITHUB_ENV
 
+      # Cache Static Libraries & Dynamic Plugins
+      - name: Cache Compiled Dependencies
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            /dev/shm/build_space/build_assets_win64
+            output_win64/libfdk_aac.dll
+          key: win64-deps-v1-${{ hashFiles('.github/workflows/build-windows.yml') }}
+
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.DLL)
       - name: Build Standalone Plugin libfdk_aac.dll
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           cd $WORKSPACE
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
@@ -64,6 +75,7 @@ jobs:
 
       # 2. BUILD OPUS STATIC (WIN64)
       - name: Build libopus
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           cd $WORKSPACE
           git clone --depth 1 https://github.com/xiph/opus.git
@@ -77,6 +89,7 @@ jobs:
 
       # 3. BUILD X264 STATIC (WIN64)
       - name: Build x264
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           cd $WORKSPACE
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
@@ -89,9 +102,10 @@ jobs:
 
       # 4. BUILD X265 STATIC (WIN64)
       - name: Build x265
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           cd $WORKSPACE
-          git clone https://bitbucket.org/multicoreware/x265_git.git x265
+          git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git x265
           echo "3.5" > x265/source/VERSION
 
           cat << 'EOF' > $WORKSPACE/mingw_toolchain.cmake
@@ -121,6 +135,7 @@ jobs:
 
       # 5. BUILD SVT-AV1 STATIC (WIN64)
       - name: Build SVT-AV1
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           cd $WORKSPACE
           git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
@@ -133,6 +148,7 @@ jobs:
 
       # 6. BUILD LIBVPX STATIC (VP8 / VP9 WIN64)
       - name: Build libvpx
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           cd $WORKSPACE
           git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git
@@ -197,7 +213,7 @@ jobs:
             $INSTALL_DIR/lib/libavfilter.a \
             $INSTALL_DIR/lib/libswscale.a \
             -L$INSTALL_DIR/lib \
-            -lstdc++ -lpthread -lwinmm -lws2_32 -lbcrypt -lole32 -luser32
+            -lstdc++ -lwinpthread -lwinmm -lws2_32 -lbcrypt -lole32 -luser32
 
           $STRIP $GITHUB_WORKSPACE/output_win64/ffmpeg.dll
 
