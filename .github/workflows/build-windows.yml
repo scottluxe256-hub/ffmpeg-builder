@@ -54,7 +54,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_win64
             output_win64/libfdk_aac.dll
-          key: win64-deps-v4-${{ hashFiles('.github/workflows/build-windows.yml') }}
+          key: win64-deps-v5-${{ hashFiles('.github/workflows/build-windows.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.DLL)
       - name: Build Standalone Plugin libfdk_aac.dll
@@ -216,7 +216,7 @@ jobs:
             $INSTALL_DIR/lib/libavfilter.a \
             $INSTALL_DIR/lib/libswscale.a \
             -L$INSTALL_DIR/lib \
-            -lstdc++ -lwinpthread -lwinmm -lws2_32 -lbcrypt -lole32 -luser32 -lcrypt32 -lncrypt -lsecur32 -lmfuuid
+            -lstdc++ -lwinpthread -lwinmm -lws2_32 -lbcrypt -lole32 -luser32 -lcrypt32 -lncrypt -lsecur32 -lmfuuid -lmfplat -lstrmiids
 
           $STRIP $GITHUB_WORKSPACE/output_win64/ffmpeg.dll
 
