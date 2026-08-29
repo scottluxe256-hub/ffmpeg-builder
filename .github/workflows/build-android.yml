@@ -149,7 +149,7 @@ jobs:
             --disable-shared --enable-static
           make -j$JOBS && make install
 
-      # 2. BUILD FFMPEG STATIC LGPL (TANPA NONFREE & TANPA FDK-AAC)
+      # 2. BUILD FFMPEG STATIC LGPL (DENGAN FLAG --enable-pic)
       - name: Build FFmpeg Static Libraries
         run: |
           cd $WORKSPACE
@@ -168,6 +168,7 @@ jobs:
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-ldflags="-L$INSTALL_DIR/lib" \
             --prefix=$INSTALL_DIR \
+            --enable-pic \
             --enable-static --disable-shared \
             --enable-gpl --disable-nonfree \
             --enable-jni --enable-mediacodec \
@@ -181,7 +182,7 @@ jobs:
         run: |
           echo "Menggabungkan static libraries menjadi satu libffmpeg.so..."
           
-          $TARGET_CLANG -shared -o $GITHUB_WORKSPACE/output_binaries/libffmpeg.so \
+          $TARGET_CLANG -shared -fPIC -Wl,-Bsymbolic -o $GITHUB_WORKSPACE/output_binaries/libffmpeg.so \
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
             -I$INSTALL_DIR/include \
             -Wl,--whole-archive \
