@@ -54,7 +54,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_win64
             output_win64/libfdk_aac.dll
-          key: win64-deps-v2-${{ hashFiles('.github/workflows/build-windows.yml') }}
+          key: win64-deps-v3-${{ hashFiles('.github/workflows/build-windows.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.DLL)
       - name: Build Standalone Plugin libfdk_aac.dll
@@ -107,7 +107,8 @@ jobs:
           cd $WORKSPACE
           git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git x265
           
-          # Fix CMake 'list GET given empty list' error on shallow clone
+          # Hapus folder .git agar CMake TIDAK memaksakan 'git describe' pada shallow clone
+          rm -rf x265/.git
           echo "3.5" > x265/source/VERSION
 
           cat << 'EOF' > $WORKSPACE/mingw_toolchain.cmake
