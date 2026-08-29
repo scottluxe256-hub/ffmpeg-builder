@@ -116,11 +116,12 @@ jobs:
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_INSTALL_LIBDIR=lib \
+            -DX265_LATEST_TAG="3.5" \
             -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON \
             -DENABLE_ASSEMBLY=OFF
           ninja -C x265/build install
 
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: master\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
 
       - name: Build SVT-AV1 (Fresh Master)
         run: |
@@ -183,19 +184,19 @@ jobs:
           $TARGET_CLANG -shared -o $GITHUB_WORKSPACE/output_binaries/libffmpeg.so \
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
             -I$INSTALL_DIR/include \
-            -Wl,--start-group \
+            -Wl,--whole-archive \
             $INSTALL_DIR/lib/libavformat.a \
             $INSTALL_DIR/lib/libavcodec.a \
-            $INSTALL_DIR/lib/libavfilter.a \
             $INSTALL_DIR/lib/libavutil.a \
-            $INSTALL_DIR/lib/libswscale.a \
             $INSTALL_DIR/lib/libswresample.a \
             $INSTALL_DIR/lib/libx264.a \
             $INSTALL_DIR/lib/libx265.a \
             $INSTALL_DIR/lib/libSvtAv1Enc.a \
             $INSTALL_DIR/lib/libvpx.a \
             $INSTALL_DIR/lib/libopus.a \
-            -Wl,--end-group \
+            -Wl,--no-whole-archive \
+            $INSTALL_DIR/lib/libavfilter.a \
+            $INSTALL_DIR/lib/libswscale.a \
             -L$INSTALL_DIR/lib \
             -lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread
 
