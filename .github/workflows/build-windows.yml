@@ -54,7 +54,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_win64
             output_win64/libfdk_aac.dll
-          key: win64-deps-v3-${{ hashFiles('.github/workflows/build-windows.yml') }}
+          key: win64-deps-v4-${{ hashFiles('.github/workflows/build-windows.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.DLL)
       - name: Build Standalone Plugin libfdk_aac.dll
@@ -107,7 +107,7 @@ jobs:
           cd $WORKSPACE
           git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git x265
           
-          # Hapus folder .git agar CMake TIDAK memaksakan 'git describe' pada shallow clone
+          # Hapus folder .git agar CMake tidak bingung saat shallow clone
           rm -rf x265/.git
           echo "3.5" > x265/source/VERSION
 
@@ -194,7 +194,7 @@ jobs:
       # 8. BUNDLE ALL STATIC LIBRARIES INTO SINGLE FFMPEG.DLL (JNI SHARED)
       - name: Bundle into Single ffmpeg.dll
         run: |
-          echo "Menggabungkan SEMUA static libraries (x264, x265, SVT-AV1, VP9, Opus) jadi satu ffmpeg.dll..."
+          echo "Menggabungkan SEMUA static libraries jadi satu ffmpeg.dll..."
           
           $TARGET_CC -shared -o $GITHUB_WORKSPACE/output_win64/ffmpeg.dll \
             $GITHUB_WORKSPACE/jni/ffmpeg_win_jni.c \
@@ -216,7 +216,7 @@ jobs:
             $INSTALL_DIR/lib/libavfilter.a \
             $INSTALL_DIR/lib/libswscale.a \
             -L$INSTALL_DIR/lib \
-            -lstdc++ -lwinpthread -lwinmm -lws2_32 -lbcrypt -lole32 -luser32
+            -lstdc++ -lwinpthread -lwinmm -lws2_32 -lbcrypt -lole32 -luser32 -lcrypt32 -lncrypt -lsecur32 -lmfuuid
 
           $STRIP $GITHUB_WORKSPACE/output_win64/ffmpeg.dll
 
