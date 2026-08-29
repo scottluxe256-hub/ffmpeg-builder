@@ -22,55 +22,47 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/android-ndk-r26b
-          key: ${{ runner.os }}-ndk-r26b-v4
+          key: ${{ runner.os }}-ndk-r26b-v5
 
       - name: Download & Extract NDK if Cache Miss
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
-          echo "Cache NDK tidak ditemukan! Memulai unduhan via Curl..."
-          curl -L --retry 5 --retry-delay 5 -o android-ndk-r26b-linux.zip https://google.com
+          echo "Memulai unduhan NDK r26b resmi..."
+          curl -L --retry 5 --retry-delay 5 -o android-ndk-r26b-linux.zip https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
           
           if [ ! -f "android-ndk-r26b-linux.zip" ] || [ ! -s "android-ndk-r26b-linux.zip" ]; then
-            echo "EROR KRITIS: Berkas android-ndk-r26b-linux.zip gagal terunduh utuh!"
+            echo "ERROR KRITIS: Berkas NDK gagal terunduh!"
             exit 1
           fi
           
-          echo "Unduhan sukses. Mengekstrak berkas..."
+          echo "Mengekstrak NDK..."
           unzip -q android-ndk-r26b-linux.zip
           rm -f android-ndk-r26b-linux.zip
-          echo "Folder NDK siap digunakan."
+          echo "NDK r26b Siap!"
 
       - name: Setup Environment Variables
         run: |
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets_aarch64"
-          mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/include"
+          NDK="$GITHUB_WORKSPACE/android-ndk-r26b"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
-          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
-          echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
+          mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/include" "$INSTALL_DIR/lib/pkgconfig"
+
+          echo "NDK_PATH=$NDK" >> $GITHUB_ENV
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig" >> $GITHUB_ENV
 
-          # Set khusus ARM64 Clang Compiler
-          echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang" >> $GITHUB_ENV
-          echo "TARGET_CXX=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++" >> $GITHUB_ENV
-          echo "CROSS_PREFIX=aarch64-linux-android-" >> $GITHUB_ENV
-
-          # Wrapper symlinks ARM64
-          mkdir -p $GITHUB_WORKSPACE/bin_wrapper_aarch64
-          cd $GITHUB_WORKSPACE/bin_wrapper_aarch64
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar aarch64-linux-android-ar || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-as aarch64-linux-android-as || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ld aarch64-linux-android-ld || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm aarch64-linux-android-nm || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib aarch64-linux-android-ranlib || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip aarch64-linux-android-strip || true
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings aarch64-linux-android-strings || true
-          
-          echo "$GITHUB_WORKSPACE/bin_wrapper_aarch64" >> $GITHUB_PATH
+          # Clang Compiler ARM64 (API Level 29)
+          echo "TARGET_CLANG=$TOOLCHAIN/bin/aarch64-linux-android29-clang" >> $GITHUB_ENV
+          echo "TARGET_CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++" >> $GITHUB_ENV
+          echo "AR=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
+          echo "RANLIB=$TOOLCHAIN/bin/llvm-ranlib" >> $GITHUB_ENV
+          echo "STRIP=$TOOLCHAIN/bin/llvm-strip" >> $GITHUB_ENV
 
       - name: Build LCEVC Integration Layer (EIL)
         run: |
-          git clone --depth 1 https://github.com
+          git clone --depth 1 https://github.com/v-novaltd/lcevc-eil.git
           cd lcevc-eil
           mkdir build && cd build
           cmake -G "Ninja" .. \
@@ -83,35 +75,41 @@ jobs:
 
       - name: Build libfdk-aac (Master)
         run: |
-          git clone --depth 1 https://github.com
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
           cd fdk-aac
           ./autogen.sh
           export CC=$TARGET_CLANG
           export CXX=$TARGET_CXX
+          export AR=$AR
+          export RANLIB=$RANLIB
           ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic
           make -j$(nproc) && make install
 
       - name: Build libopus (Master)
         run: |
-          git clone --depth 1 https://github.com
+          git clone --depth 1 https://github.com/xiph/opus.git
           cd opus
           ./autogen.sh
           export CC=$TARGET_CLANG
+          export AR=$AR
+          export RANLIB=$RANLIB
           ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic
           make -j$(nproc) && make install
 
       - name: Build x264 (Master)
         run: |
-          git clone --depth 1 https://videolan.org
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
           export CC=$TARGET_CLANG
-          ./configure --host=aarch64-linux-android --cross-prefix=$CROSS_PREFIX \
-            --prefix=$INSTALL_DIR --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
+          export AR=$AR
+          export RANLIB=$RANLIB
+          ./configure --host=aarch64-linux-android \
+            --prefix=$INSTALL_DIR --enable-static --enable-pic --disable-cli
           make -j$(nproc) && make install
 
       - name: Build x265 (Master)
         run: |
-          git clone --depth 1 https://github.com
+          git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git x265
           cmake -G "Ninja" -S x265/source -B x265/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
@@ -121,13 +119,11 @@ jobs:
             -DENABLE_ASSEMBLY=OFF
           ninja -C x265/build install
 
-          mkdir -p $INSTALL_DIR/lib/pkgconfig
-          # FIX: Memperbaiki string penulisan variabel lingkungan prefix agar valid dibaca pkg-config
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 4.3\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: master\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
 
       - name: Build SVT-AV1 (Fresh Master)
         run: |
-          git clone --depth 1 https://gitlab.com
+          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
           cmake -G "Ninja" -S SVT-AV1 -B SVT-AV1/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
@@ -138,30 +134,29 @@ jobs:
 
       - name: Build libvpx (Master)
         run: |
-          git clone --depth 1 https://googlesource.com
+          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git
           cd libvpx
           export CC=$TARGET_CLANG
           export CXX=$TARGET_CXX
-          ./configure --target=arm64-android-gcc --prefix=$INSTALL_DIR \
+          export AR=$AR
+          export RANLIB=$RANLIB
+          ./configure --target=generic-gnu --prefix=$INSTALL_DIR \
             --enable-pic --disable-examples --disable-unit-tests --enable-vp8 --enable-vp9 \
-            --disable-shared --enable-static --as=yasm
+            --disable-shared --enable-static
           make -j$(nproc) && make install
 
       - name: Build FFmpeg (Fresh Master ARM64)
         run: |
-          mkdir ffmpeg_source && cd ffmpeg_source
-          git init -q
-          git remote add origin https://github.com
-          git fetch --depth 1 origin master
-          git checkout -q FETCH_HEAD
+          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
+          cd ffmpeg_source
 
           ./configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
             --cc=$TARGET_CLANG \
             --cxx=$TARGET_CXX \
-            --ar=aarch64-linux-android-ar \
-            --ranlib=aarch64-linux-android-ranlib \
-            --strip=aarch64-linux-android-strip \
+            --ar=$AR \
+            --ranlib=$RANLIB \
+            --strip=$STRIP \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
@@ -176,7 +171,7 @@ jobs:
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$(nproc)
-          $TOOLCHAIN/bin/llvm-strip ffmpeg
+          $STRIP ffmpeg
 
       - name: Verify Binary Dependencies
         run: |
