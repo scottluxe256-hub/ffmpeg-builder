@@ -17,26 +17,23 @@ jobs:
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
             git yasm nasm texinfo cmake ninja-build wget unzip meson
 
-            # 1. TAHAP CACHE YANG DIPERBAIKI (Mengecek folder hasil ekstraksi, bukan file zip)
       - name: Cache Android NDK
         id: cache-ndk
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/android-ndk-r26b
-          key: ${{ runner.os }}-ndk-r26b-v1
+          key: ${{ runner.os }}-ndk-r26b-v2
 
-      # 2. TAHAP UNDUH (Hanya berjalan jika folder NDK tidak ada di cache)
       - name: Download & Extract NDK if Cache Miss
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
-          echo "Cache NDK tidak ditemukan! Memulai proses unduhan resmi..."
+          echo "Cache NDK tidak ditemukan! Memulai proses unduhan..."
           wget -q https://google.com
           echo "Unduhan selesai. Mengekstrak berkas..."
           unzip -q android-ndk-r26b-linux.zip
           rm -f android-ndk-r26b-linux.zip
           echo "Folder NDK siap digunakan."
 
-      # 3. TAHAP KONFIGURASI LINGKUNGAN (Pasti aman karena folder NDK sudah dijamin ada)
       - name: Setup Environment Variables
         run: |
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets_aarch64"
@@ -63,7 +60,7 @@ jobs:
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings aarch64-linux-android-strings || true
           
           echo "$GITHUB_WORKSPACE/bin_wrapper_aarch64" >> $GITHUB_PATH
-          
+
       - name: Build LCEVC Integration Layer (EIL)
         run: |
           git clone --depth 1 https://github.com
