@@ -1,11 +1,27 @@
-name: Build FFmpeg Master Universal Windows Static (Fast & Fixed)
+name: Build Full FFmpeg Android + LCEVC + FDK-AAC (Fresh Master)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-android-ffmpeg:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: "arm64-v8a"
+            arch: "aarch64"
+            cpu: "armv8-a"
+            target_host: "aarch64-linux-android"
+            api_level: "29"
+            artifact_name: "ffmpeg-android-aarch64-lcevc-master"
+          - abi: "armeabi-v7a"
+            arch: "arm"
+            cpu: "armv7-a"
+            target_host: "armv7a-linux-androideabi"
+            api_level: "29"
+            artifact_name: "ffmpeg-android-armv7a-lcevc-master"
 
     steps:
       - name: Checkout Repository
@@ -15,142 +31,178 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo mingw-w64 g++-mingw-w64 cmake ninja-build ccache
+            git yasm nasm texinfo cmake ninja-build wget unzip meson
 
-      - name: Set Environment Variables
-        run: |
-          echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> $GITHUB_ENV
-          echo "PKG_CONFIG_LIBDIR=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> $GITHUB_ENV
-
-      # Cache folder library static agar tidak perlu compile ulang
-      - name: Cache Build Assets
-        id: cache-assets
+      - name: Cache Android NDK
+        id: cache-ndk
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/build_assets
-          key: ${{ runner.os }}-ffmpeg-assets-v3
+          path: ${{ github.workspace }}/android-ndk-r26b
+          key: ${{ runner.os }}-ndk-r26b
 
-      - name: Build libfdk-aac
-        if: steps.cache-assets.outputs.cache-hit != 'true'
+      - name: Setup Environment & Android NDK r26b
         run: |
-          git clone --depth 1 https://github.com/mstorsjo/fdk-aac
-          cd fdk-aac
-          ./autogen.sh
-          ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-shared
-          make -j$(nproc) && make install
+          if [ "${{ steps.cache-ndk.outputs.cache-hit }}" != "true" ]; then
+            wget -q https://google.com
+            unzip -q android-ndk-r26b-linux.zip
+          fi
 
-      - name: Build libopus
-        if: steps.cache-assets.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://github.com/xiph/opus.git
-          cd opus
-          ./autogen.sh
-          ./configure --host=x86_64-w64-mingw32 --prefix=$INSTALL_DIR --enable-static --disable-shared
-          make -j$(nproc) && make install
+          INSTALL_DIR="$GITHUB_WORKSPACE/build_assets_${{ matrix.arch }}"
 
-      - name: Build libvpx
-        if: steps.cache-assets.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx
-          cd libvpx
-          CROSS=x86_64-w64-mingw32- ./configure \
-            --target=x86_64-win64-gcc \
-            --prefix=$INSTALL_DIR \
-            --enable-static \
-            --disable-shared \
-            --disable-examples \
-            --disable-unit-tests \
-            --enable-vp8 \
-            --enable-vp9 \
-            --enable-vp9-highbitdepth
-          make -j$(nproc) && make install
+          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
+          echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
+          echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
 
-      - name: Build x264
-        if: steps.cache-assets.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://code.videolan.org/videolan/x264.git
-          cd x264
-          ./configure --host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32- --prefix=$INSTALL_DIR --enable-static --disable-cli
-          make -j$(nproc) && make install
+          if [ "${{ matrix.arch }}" = "arm" ]; then
+            echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api_level }}-clang" >> $GITHUB_ENV
+            echo "TARGET_CXX=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api_level }}-clang++" >> $GITHUB_ENV
+            echo "CROSS_PREFIX=armv7a-linux-androideabi-" >> $GITHUB_ENV
+          else
+            echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api_level }}-clang" >> $GITHUB_ENV
+            echo "TARGET_CXX=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api_level }}-clang++" >> $GITHUB_ENV
+            echo "CROSS_PREFIX=aarch64-linux-android-" >> $GITHUB_ENV
+          fi
 
-      - name: Build x265
-        if: steps.cache-assets.outputs.cache-hit != 'true'
-        run: |
-          git clone https://github.com/videolan/x265.git
-          cd x265
-          mkdir -p build && cd build
-          cmake -G "Ninja" ../source \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
-            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_SHARED=OFF \
-            -DENABLE_CLI=OFF \
-            -DEXPORT_C_API=ON
-          ninja -j$(nproc) && ninja install
-
-      - name: Build SVT-AV1
-        if: steps.cache-assets.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
-          cd SVT-AV1
-          mkdir build && cd build
-          cmake -G "Ninja" \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
-            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DBUILD_SHARED_LIBS=OFF ..
-          ninja -j$(nproc) && ninja install
-
-      - name: Install NVENC Headers (Nvidia GPU - ffnvcodec)
-        if: steps.cache-assets.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git
-          cd nv-codec-headers
-          make PREFIX=$INSTALL_DIR install
-
-      - name: Build FFmpeg Git Master
-        run: |
-          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
-          cd ffmpeg_source
+          mkdir -p $GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}
+          cd $GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar ${{ matrix.target_host }}-ar || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-as ${{ matrix.target_host }}-as || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ld ${{ matrix.target_host }}-ld || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm ${{ matrix.target_host }}-nm || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib ${{ matrix.target_host }}-ranlib || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip ${{ matrix.target_host }}-strip || true
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings ${{ matrix.target_host }}-strings || true
           
+          if [ "${{ matrix.arch }}" = "arm" ]; then
+            ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings arm-linux-androideabi-strings || true
+          fi
+
+          echo "$GITHUB_WORKSPACE/bin_wrapper_${{ matrix.arch }}" >> $GITHUB_PATH
+
+      # --- TAHAP TAMBAHAN: MENGUNDUH & BUILD LCEVC SDK ---
+      - name: Build LCEVC Integration Layer (EIL)
+        run: |
+          git clone --depth 1 https://github.com
+          cd lcevc-eil
+          mkdir build && cd build
+          # Mengonfigurasi LCEVC menggunakan sistem CMake Android NDK
+          cmake -G "Ninja" .. \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-${{ matrix.api_level }} \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF
+          ninja install
+
+      # --- LIBRARIES STANDARD ---
+
+      - name: Build libfdk-aac (Master)
+        run: |
+          git clone --depth 1 https://github.com
+          cd fdk-aac && ./autogen.sh
+          export CC=$TARGET_CLANG
+          export CXX=$TARGET_CXX
+          ./configure --host=${{ matrix.target_host }} --prefix=$INSTALL_DIR --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+      - name: Build libopus (Master)
+        run: |
+          git clone --depth 1 https://github.com
+          cd opus && ./autogen.sh
+          export CC=$TARGET_CLANG
+          ./configure --host=${{ matrix.target_host }} --prefix=$INSTALL_DIR --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+      - name: Build x264 (Master)
+        run: |
+          git clone --depth 1 https://videolan.org
+          cd x264
+          export CC=$TARGET_CLANG
+          ./configure --host=${{ matrix.target_host }} --cross-prefix=$CROSS_PREFIX \
+            --prefix=$INSTALL_DIR --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
+          make -j$(nproc) && make install
+
+      - name: Build x265 (Master)
+        run: |
+          git clone --depth 1 https://github.com
+          cmake -G "Ninja" -S x265/source -B x265/build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-${{ matrix.api_level }} \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON \
+            -DENABLE_ASSEMBLY=OFF
+          ninja -C x265/build install
+
+          mkdir -p $INSTALL_DIR/lib/pkgconfig
+          printf "prefix=%s\nexec_prefix=\鍵prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 4.3\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
+
+      - name: Build SVT-AV1 (Fresh Master)
+        run: |
+          git clone --depth 1 https://gitlab.com
+          cmake -G "Ninja" -S SVT-AV1 -B SVT-AV1/build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-${{ matrix.api_level }} \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
+          ninja -C SVT-AV1/build install
+
+      - name: Build libvpx (Master)
+        run: |
+          git clone --depth 1 https://googlesource.com
+          cd libvpx
+          export CC=$TARGET_CLANG
+          export CXX=$TARGET_CXX
+          
+          if [ "${{ matrix.arch }}" = "arm" ]; then
+            VPX_TARGET="armv7-android-gcc"
+          else
+            VPX_TARGET="arm64-android-gcc"
+          fi
+
+          ./configure --target=$VPX_TARGET --prefix=$INSTALL_DIR \
+            --enable-pic --disable-examples --disable-unit-tests --enable-vp8 --enable-vp9 \
+            --disable-shared --enable-static --as=yasm
+          make -j$(nproc) && make install
+
+      # --- FFMPEG TRUE MASTER + LCEVC FLAGS ---
+
+      - name: Build FFmpeg (Fresh Master)
+        run: |
+          mkdir ffmpeg_source && cd ffmpeg_source
+          git init -q
+          git remote add origin https://github.com
+          git fetch --depth 1 origin master
+          git checkout -q FETCH_HEAD
+
           ./configure \
-            --enable-cross-compile \
-            --cross-prefix=x86_64-w64-mingw32- \
-            --arch=x86_64 \
-            --target-os=mingw32 \
-            --pkg-config=pkg-config \
-            --pkg-config-flags="--static" \
+            --target-os=android --arch=${{ matrix.arch }} --cpu=${{ matrix.cpu }} --enable-cross-compile \
+            --cc=$TARGET_CLANG \
+            --cxx=$TARGET_CXX \
+            --ar=${{ matrix.target_host }}-ar \
+            --ranlib=${{ matrix.target_host }}-ranlib \
+            --strip=${{ matrix.target_host }}-strip \
+            --pkg-config=pkg-config --pkg-config-flags="--static" \
+            --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
+            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread" \
             --prefix=$INSTALL_DIR \
-            --extra-cflags="-I$INSTALL_DIR/include" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -static -static-libgcc -static-libstdc++" \
-            --extra-libs="-lstdc++ -lwinpthread -lm" \
-            --enable-static \
-            --disable-shared \
-            --enable-gpl \
-            --enable-nonfree \
-            --enable-libfdk-aac \
-            --enable-libopus \
-            --enable-libvpx \
-            --enable-libx264 \
-            --enable-libx265 \
-            --enable-libsvtav1 \
-            --enable-ffnvcodec \
-            --enable-nvenc \
-            --enable-nvdec \
-            --enable-dxva2 \
-            --enable-d3d11va
+            --enable-static --disable-shared \
+            --enable-gpl --enable-nonfree \
+            --enable-jni --enable-mediacodec \
+            --enable-liblcevc_sei \
+            --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvpx --enable-libopus \
+          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
+
           make -j$(nproc)
-          x86_64-w64-mingw32-strip ffmpeg.exe
+          $TOOLCHAIN/bin/llvm-strip ffmpeg
 
-      - name: Print Config Log on Failure
-        if: failure()
-        run: test -f ffmpeg_source/ffbuild/config.log && cat ffmpeg_source/ffbuild/config.log || echo "Config log not found."
-
-      - name: Upload FFmpeg Executable
-        uses: actions/upload-artifact@v4
-        with:
-          name: FFmpeg-Master-Universal-Windows
-          path: ffmpeg_source/ffmpeg.exe
+      - name: Verify Binary Dependencies
+        run: |
+          cd ffmpeg_source
+          file ffmpeg
+          echo "---- NEEDED shared libraries ----"
+          
