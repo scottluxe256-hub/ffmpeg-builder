@@ -22,23 +22,20 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/android-ndk-r26b
-          key: ${{ runner.os }}-ndk-r26b-v3
+          key: ${{ runner.os }}-ndk-r26b-v4
 
       - name: Download & Extract NDK if Cache Miss
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
           echo "Cache NDK tidak ditemukan! Memulai unduhan via Curl..."
+          curl -L --retry 5 --retry-delay 5 -o android-ndk-r26b-linux.zip https://google.com
           
-          # Menggunakan Curl dengan fitur retry otomatis 5 kali jika jaringan intermiten
-          curl -L --retry 5 --retry-delay 5 -o android-ndk-r26b-linux.zip https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
-          
-          # Cek validasi keberadaan berkas sebelum diekstrak
           if [ ! -f "android-ndk-r26b-linux.zip" ] || [ ! -s "android-ndk-r26b-linux.zip" ]; then
-            echo "EROR KRITIS: Berkas android-ndk-r26b-linux.zip gagal terunduh secara utuh!"
+            echo "EROR KRITIS: Berkas android-ndk-r26b-linux.zip gagal terunduh utuh!"
             exit 1
           fi
           
-          echo "Unduhan terverifikasi sukses. Mengekstrak berkas..."
+          echo "Unduhan sukses. Mengekstrak berkas..."
           unzip -q android-ndk-r26b-linux.zip
           rm -f android-ndk-r26b-linux.zip
           echo "Folder NDK siap digunakan."
@@ -46,11 +43,12 @@ jobs:
       - name: Setup Environment Variables
         run: |
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets_aarch64"
+          mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/include"
 
           echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
           echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig" >> $GITHUB_ENV
 
           # Set khusus ARM64 Clang Compiler
           echo "TARGET_CLANG=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang" >> $GITHUB_ENV
@@ -72,8 +70,6 @@ jobs:
 
       - name: Build LCEVC Integration Layer (EIL)
         run: |
-          echo "Memulai kloning pustaka LCEVC EIL resmi..."
-          # Perbaikan Utama: Mengembalikan URL repositori yang terpotong
           git clone --depth 1 https://github.com
           cd lcevc-eil
           mkdir build && cd build
@@ -88,18 +84,20 @@ jobs:
       - name: Build libfdk-aac (Master)
         run: |
           git clone --depth 1 https://github.com
-          cd fdk-aac && ./autogen.sh
+          cd fdk-aac
+          ./autogen.sh
           export CC=$TARGET_CLANG
           export CXX=$TARGET_CXX
-          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
+          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic
           make -j$(nproc) && make install
 
       - name: Build libopus (Master)
         run: |
           git clone --depth 1 https://github.com
-          cd opus && ./autogen.sh
+          cd opus
+          ./autogen.sh
           export CC=$TARGET_CLANG
-          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
+          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic
           make -j$(nproc) && make install
 
       - name: Build x264 (Master)
@@ -124,6 +122,7 @@ jobs:
           ninja -C x265/build install
 
           mkdir -p $INSTALL_DIR/lib/pkgconfig
+          # FIX: Memperbaiki string penulisan variabel lingkungan prefix agar valid dibaca pkg-config
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 4.3\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
 
       - name: Build SVT-AV1 (Fresh Master)
@@ -166,7 +165,7 @@ jobs:
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
+            --extra-ldflags="-L$INSTALL_DIR/lib" \
             --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
