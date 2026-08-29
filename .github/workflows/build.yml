@@ -1,4 +1,4 @@
-name: Build Full FFmpeg Static Android ARM64 + FDK-AAC (Fresh Master Enterprise)
+name: Build FFmpeg Modular Shared Library (.so) ARM64 Enterprise
 
 on:
   workflow_dispatch:
@@ -66,7 +66,8 @@ jobs:
           echo "RANLIB=$TOOLCHAIN/bin/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/bin/llvm-strip" >> $GITHUB_ENV
 
-      - name: Build libfdk-aac (Master)
+      # 1. BUILD LIBFDK-AAC TERPISAH SEBAGAI SHARED LIBRARY (.SO)
+      - name: Build Standalone Plugin libfdk_aac.so
         run: |
           cd $WORKSPACE
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
@@ -76,13 +77,16 @@ jobs:
           export CXX=$TARGET_CXX
           export AR=$AR
           export RANLIB=$RANLIB
-          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic
-          make -j$JOBS && make install
+          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-shared --disable-static --with-pic
+          make -j$JOBS
+          $STRIP .libs/libfdk-aac.so
+          mkdir -p $GITHUB_WORKSPACE/output_binaries
+          cp .libs/libfdk-aac.so $GITHUB_WORKSPACE/output_binaries/libfdk_aac.so
 
       - name: Build libopus (Master)
         run: |
           cd $WORKSPACE
-          git clone --depth 1 https://github.com/xiph/opus.git
+          git clone --depth 1 https://xiph/opus.git || git clone --depth 1 https://github.com/xiph/opus.git
           cd opus
           ./autogen.sh
           export CC=$TARGET_CLANG
@@ -144,7 +148,8 @@ jobs:
             --disable-shared --enable-static
           make -j$JOBS && make install
 
-      - name: Build FFmpeg (Fresh Master ARM64 Enterprise)
+      # 2. BUILD FFMPEG STATIC LGPL (TANPA NONFREE & TANPA FDK-AAC)
+      - name: Build FFmpeg Static Libraries
         run: |
           cd $WORKSPACE
           git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
@@ -161,26 +166,44 @@ jobs:
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-ldflags="-L$INSTALL_DIR/lib" \
-            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
-            --enable-gpl --enable-nonfree \
+            --enable-gpl --disable-nonfree \
             --enable-jni --enable-mediacodec \
-            --enable-libfdk-aac --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvpx --enable-libopus \
+            --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvpx --enable-libopus \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
-          make -j$JOBS
-          $STRIP ffmpeg
-          cp ffmpeg $GITHUB_WORKSPACE/ffmpeg_arm64_enterprise
+          make -j$JOBS install
 
-      - name: Verify Binary Dependencies
+      # 3. BUNDLING SEMUA FILE .A MENJADI TUNGGAL LIBFFMPEG.SO (JNI SHARED)
+      - name: Bundle into Single libffmpeg.so
         run: |
-          file $GITHUB_WORKSPACE/ffmpeg_arm64_enterprise
-          echo "---- NEEDED shared libraries ----"
-          $TOOLCHAIN/bin/llvm-readelf -d $GITHUB_WORKSPACE/ffmpeg_arm64_enterprise | grep -E "NEEDED|SONAME" || true
+          echo "Menggabungkan static libraries menjadi satu libffmpeg.so..."
+          
+          $TARGET_CLANG -shared -o $GITHUB_WORKSPACE/output_binaries/libffmpeg.so \
+            $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
+            -I$INSTALL_DIR/include \
+            -Wl,--whole-archive \
+            $INSTALL_DIR/lib/libavformat.a \
+            $INSTALL_DIR/lib/libavcodec.a \
+            $INSTALL_DIR/lib/libavfilter.a \
+            $INSTALL_DIR/lib/libavutil.a \
+            $INSTALL_DIR/lib/libswscale.a \
+            $INSTALL_DIR/lib/libswresample.a \
+            $INSTALL_DIR/lib/libx264.a \
+            $INSTALL_DIR/lib/libx265.a \
+            $INSTALL_DIR/lib/libSvtAv1Enc.a \
+            $INSTALL_DIR/lib/libvpx.a \
+            $INSTALL_DIR/lib/libopus.a \
+            -Wl,--no-whole-archive \
+            -L$INSTALL_DIR/lib \
+            -lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread
 
-      - name: Upload Artifact
+          $STRIP $GITHUB_WORKSPACE/output_binaries/libffmpeg.so
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-arm64-enterprise-fresh
-          path: ffmpeg_arm64_enterprise
+          name: ffmpeg-and-plugins-arm64
+          path: output_binaries/*
+          
