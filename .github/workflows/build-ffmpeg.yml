@@ -101,12 +101,12 @@ jobs:
           cmake --build "$SRC/x265-b" && cmake --install "$SRC/x265-b"
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265\nLibs.private: -lc++_static -lc++abi -lm -ldl -pthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
-          # 7. SVT-AV1
-          clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
+          # 7. SVT-AV1 (Lock Tag v2.1.0)
+          git clone --depth 1 --branch v2.1.0 https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cmake_android "$SRC/SVT-AV1" "$SRC/SVT-AV1-b" -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           cmake --build "$SRC/SVT-AV1-b" && cmake --install "$SRC/SVT-AV1-b"
 
-          # 8. libaom (Fix + Custom .pc Generator)
+          # 8. libaom
           clone https://aomedia.googlesource.com/aom "$SRC/aom"
           cmake_android "$SRC/aom" "$SRC/aom-b" -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TOOLS=OFF -DENABLE_NEON=ON
           cmake --build "$SRC/aom-b" && cmake --install "$SRC/aom-b"
@@ -135,7 +135,7 @@ jobs:
           ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
           make -j$(nproc) && make install
 
-          # 13. webp (Fix + Custom .pc Generator)
+          # 13. webp
           clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
           cmake_android "$SRC/libwebp" "$SRC/libwebp-b" -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_ENABLE_SIMD=ON
           cmake --build "$SRC/libwebp-b" && cmake --install "$SRC/libwebp-b"
@@ -147,7 +147,7 @@ jobs:
           ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-      - name: Build FFmpeg Binaries
+      - name: Build FFmpeg Binaries (v9.0.1)
         shell: bash
         run: |
           set -euxo pipefail
@@ -156,8 +156,8 @@ jobs:
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
 
           cd "$ROOT"
-          wget -q "https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz"
-          tar -xJf ffmpeg-7.1.tar.xz
+          wget -q "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz"
+          tar -xJf ffmpeg-9.0.1.tar.xz
 
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
@@ -197,32 +197,39 @@ jobs:
           )
 
           # Build GPL Version
-          cp -r ffmpeg-7.1 ffmpeg-gpl && cd ffmpeg-gpl
+          cp -r ffmpeg-9.0.1 ffmpeg-gpl && cd ffmpeg-gpl
           ./configure "${FLAGS[@]}" --enable-gpl
           make -j$(nproc)
+          
+          # Verifikasi otomatis GPL
+          ./ffmpeg -buildconf > buildconf-gpl.txt
+          for lib in "libaom" "libwebp" "libzimg"; do
+            if ! grep -q "--enable-$lib" buildconf-gpl.txt; then
+              echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI GPL BUILD!"
+              exit 1
+            fi
+          done
+
           mkdir -p "$ROOT/dist/gpl"
           cp ffmpeg "$ROOT/dist/gpl/ffmpeg-gpl"
 
           # Build Nonfree Version
           cd "$ROOT"
-          cp -r ffmpeg-7.1 ffmpeg-nonfree && cd ffmpeg-nonfree
+          cp -r ffmpeg-9.0.1 ffmpeg-nonfree && cd ffmpeg-nonfree
           ./configure "${FLAGS[@]}" --enable-gpl --enable-nonfree --enable-libfdk-aac
           make -j$(nproc)
-          mkdir -p "$ROOT/dist/nonfree"
-          cp ffmpeg "$ROOT/dist/nonfree/ffmpeg-nonfree"
 
-          # --- VERIFIKASI WAJIB: Gagal otomatis jika library hilang ---
-          echo "=== VERIFIKASI CODEC WAJIB ==="
-          ./ffmpeg -buildconf > buildconf.txt
-          cat buildconf.txt
-          
+          # Verifikasi otomatis Nonfree
+          ./ffmpeg -buildconf > buildconf-nonfree.txt
           for lib in "libaom" "libwebp" "libzimg"; do
-            if ! grep -q "--enable-$lib" buildconf.txt; then
-              echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI RESULT BUILD!"
+            if ! grep -q "--enable-$lib" buildconf-nonfree.txt; then
+              echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI NONFREE BUILD!"
               exit 1
             fi
           done
-          echo "VERIFIKASI BERHASIL: Semua library wajib (aom, webp, zimg) terpasang!"
+
+          mkdir -p "$ROOT/dist/nonfree"
+          cp ffmpeg "$ROOT/dist/nonfree/ffmpeg-nonfree"
 
           # Packing ke ZIP
           cd "$ROOT/dist"
