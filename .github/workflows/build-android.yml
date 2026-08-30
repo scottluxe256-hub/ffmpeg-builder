@@ -67,7 +67,7 @@ jobs:
           NDK_CMAKE="$NDK_PATH/build/cmake/android.toolchain.cmake"
           echo "NDK_CMAKE=$NDK_CMAKE" >> $GITHUB_ENV
 
-      # Cache Static Libraries (Key dinaikkan ke v7 agar build soxr terbarui)
+      # Cache Static Libraries (Keeping v7 so it reuses the fixed soxr build)
       - name: Cache Compiled Dependencies
         id: cache-deps
         uses: actions/cache@v4
@@ -244,6 +244,7 @@ jobs:
           git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
           cd ffmpeg_source
 
+          # ADDED --enable-jni HERE!
           ./configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
             --cc=$TARGET_CC --cxx=$TARGET_CXX --ar=$AR --ranlib=$RANLIB --strip=$STRIP \
@@ -253,7 +254,7 @@ jobs:
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
             --enable-gpl --disable-nonfree \
-            --enable-mediacodec \
+            --enable-jni --enable-mediacodec \
             --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus --enable-libmp3lame --enable-libvorbis --enable-libsoxr \
             --enable-libsvtav1 --enable-libaom --enable-librav1e --enable-libdav1d \
             --enable-libwebp --enable-libzimg \
