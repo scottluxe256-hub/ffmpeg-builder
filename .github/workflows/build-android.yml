@@ -28,16 +28,16 @@ jobs:
           rustup target add aarch64-linux-android
           cargo install cargo-ndk
 
-      # Gunakan GitHub Action NDK (Bebas dari masalah download Google URL)
-      - name: Setup Android NDK r26b
-        uses: nsetup/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r26b
+      # Menggunakan NDK bawaan runner Ubuntu GitHub (Gak perlu download/action luar!)
+      - name: Locate Pre-installed Android NDK
+        run: |
+          # Cari folder NDK yang sudah terinstall otomatis di runner
+          NDK_FOUND=$(ls -d $ANDROID_SDK_ROOT/ndk/* | tail -n 1)
+          echo "NDK_PATH=$NDK_FOUND" >> $GITHUB_ENV
+          echo "Target NDK Path: $NDK_FOUND"
 
       - name: Setup Toolchain & Directories
         run: |
-          echo "NDK_PATH=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
           echo "TARGET_API=29" >> $GITHUB_ENV
           echo "BUILD_DIR=$GITHUB_WORKSPACE/build_space" >> $GITHUB_ENV
           echo "PREFIX_GPL=$GITHUB_WORKSPACE/dist/gpl" >> $GITHUB_ENV
