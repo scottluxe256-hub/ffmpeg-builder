@@ -16,7 +16,7 @@ int main(int argc, char *argv[]) {
     int bitrate = 64000;       // Default 64k
     int aot = 29;              // Default HE-AAC v2 (AOT 29)
 
-    // Parse Argumen CLI ala FFmpeg
+    // Parse Argumen CLI
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) input_file = argv[++i];
         else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) output_file = argv[++i];
@@ -99,14 +99,6 @@ int main(int argc, char *argv[]) {
     aacEncoder_SetParam(hAac, AACENC_BITRATE, bitrate);
     aacEncoder_SetParam(hAac, AACENC_TRANSMUX, 2);        // ADTS Header Stream
 
-    if (aacEncInitAac(hAac, NULL, NULL) != AACENC_OK) {
-        printf("Error: Gagal mengkonfigurasi FDK-AAC Encoder!\n");
-        aacEncClose(&hAac);
-        avcodec_free_context(&dec_ctx);
-        avformat_close_input(&fmt_ctx);
-        return 1;
-    }
-
     // 4. SETUP RESAMPLER (Konversi Audio Internal ke S16 Stereo PCM)
     SwrContext *swr_ctx = swr_alloc();
     AVChannelLayout out_ch_layout = AV_CHANNEL_LAYOUT_STEREO;
@@ -125,7 +117,7 @@ int main(int argc, char *argv[]) {
     printf("[Engine] Processing Direct Input: %s -> %s [Profile: %d, Bitrate: %d bps]\n", 
             input_file, output_file, aot, bitrate);
 
-    // 5. PROCESSING LOOP (Packet -> Decode PCM -> Encode FDK-AAC -> Write File)
+    // 5. PROCESSING LOOP
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
     
@@ -154,7 +146,6 @@ int main(int argc, char *argv[]) {
             if (avcodec_send_packet(dec_ctx, pkt) == 0) {
                 while (avcodec_receive_frame(dec_ctx, frame) == 0) {
                     
-                    // Resample Frame ke S16 PCM
                     int converted_samples = swr_convert(swr_ctx, 
                                                         &swr_output_buf, 2048,
                                                         (const uint8_t **)frame->data, frame->nb_samples);
