@@ -13,6 +13,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Setup Android NDK
+        uses: nsetup/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r25c
+
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -29,19 +35,13 @@ jobs:
           cargo install cargo-ndk
 
       # -------------------------------------------------------------
-      # COMPILE ALL EXTERNAL LIBRARIES (BULLETPROOF EDITION)
+      # COMPILE ALL EXTERNAL LIBRARIES
       # -------------------------------------------------------------
       - name: Build All External Libraries
         run: |
-          # 1. Pastikan NDK ketemu dengan akurat
-          NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* 2>/dev/null | sort -V | tail -n 1)
-          if [ -z "$NDK_PATH" ]; then
-            NDK_PATH=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -n 1)
-          fi
-          
+          NDK_PATH="${{ steps.setup-ndk.outputs.ndk-path }}"
           echo "=== NDK FOUND AT: $NDK_PATH ==="
           
-          # 2. Export environment variable yang wajib ada
           export ANDROID_NDK_HOME=$NDK_PATH
           BUILD_DIR=$GITHUB_WORKSPACE/build_space
           PREFIX_GPL=$GITHUB_WORKSPACE/dist/gpl
@@ -50,7 +50,6 @@ jobs:
           mkdir -p $BUILD_DIR $PREFIX_GPL $PREFIX_NONFREE
           mkdir -p $PREFIX_GPL/lib/pkgconfig $PREFIX_NONFREE/lib/pkgconfig
 
-          # 3. Setup Toolchain Pointers
           export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
           export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
@@ -60,12 +59,6 @@ jobs:
           export AS=$TOOLCHAIN/bin/llvm-as
           export NM=$TOOLCHAIN/bin/llvm-nm
           export LD=$TOOLCHAIN/bin/ld.lld
-
-          # Validasi CC
-          if [ ! -x "$CC" ]; then
-            echo "FATAL ERROR: Compiler tidak valid di $CC"
-            exit 1
-          fi
 
           export CFLAGS="-O3 -ftree-vectorize -flto -march=armv8-a+simd+crypto -fPIC -D__ANDROID_API__=29"
           export CXXFLAGS="$CFLAGS"
@@ -81,7 +74,7 @@ jobs:
 
           cd $BUILD_DIR
 
-          # 1. zlib (Diperbaiki pengenalan compilernya)
+          # 1. zlib
           git clone --depth 1 https://github.com/madler/zlib.git
           cd zlib
           CC="$CC" CFLAGS="$CFLAGS" ./configure --prefix=$BUILD_DIR/out_zlib --static
@@ -125,7 +118,7 @@ jobs:
           install_libs $BUILD_DIR/out_zimg
           cd $BUILD_DIR
 
-          # 6. x264 (Diperbaiki flag AS-nya)
+          # 6. x264
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
           AS="$CC" ./configure --host=aarch64-linux --enable-static --disable-cli --cross-prefix=$TOOLCHAIN/bin/llvm- --prefix=$BUILD_DIR/out_x264
@@ -157,7 +150,7 @@ jobs:
           install_libs $BUILD_DIR/out_aom
           cd $BUILD_DIR
 
-          # 10. librav1e (Diperbaiki isu ANDROID_NDK_HOME)
+          # 10. librav1e
           git clone --depth 1 https://github.com/xiph/rav1e.git
           cd rav1e
           cargo ndk -t arm64-v8a -p 29 -- build --release --c-header
@@ -223,10 +216,7 @@ jobs:
       # -------------------------------------------------------------
       - name: Compile FFmpeg Master - GPL Free
         run: |
-          NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* 2>/dev/null | sort -V | tail -n 1)
-          if [ -z "$NDK_PATH" ]; then
-            NDK_PATH=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -n 1)
-          fi
+          NDK_PATH="${{ steps.setup-ndk.outputs.ndk-path }}"
           BUILD_DIR=$GITHUB_WORKSPACE/build_space
           PREFIX_GPL=$GITHUB_WORKSPACE/dist/gpl
 
@@ -287,10 +277,7 @@ jobs:
       # -------------------------------------------------------------
       - name: Compile FFmpeg Master - NonFree
         run: |
-          NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* 2>/dev/null | sort -V | tail -n 1)
-          if [ -z "$NDK_PATH" ]; then
-            NDK_PATH=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -n 1)
-          fi
+          NDK_PATH="${{ steps.setup-ndk.outputs.ndk-path }}"
           BUILD_DIR=$GITHUB_WORKSPACE/build_space
           PREFIX_NONFREE=$GITHUB_WORKSPACE/dist/nonfree
 
