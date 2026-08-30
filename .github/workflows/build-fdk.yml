@@ -15,17 +15,23 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Android NDK
-        uses: nsetup/setup-android-ndk@v1.0.0
-        with:
-          ndk-version: 'r25c'
+      - name: Setup Android NDK (Native Runner)
+        run: |
+          # Cari lokasi NDK bawaan GitHub Runner
+          if [ -d "$ANDROID_SDK_ROOT/ndk-bundle" ]; then
+            NDK_PATH="$ANDROID_SDK_ROOT/ndk-bundle"
+          else
+            NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | tail -n 1)
+          fi
+          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
+          echo "Menggunakan NDK dari: $NDK_PATH"
 
       - name: Cache Build Dependencies
         uses: actions/cache@v3
         with:
           path: |
             build_deps
-          key: fdk-deps-arm64-v4-${{ hashFiles('**/build-fdk.yml') }}
+          key: fdk-deps-arm64-v5-${{ hashFiles('**/build-fdk.yml') }}
 
       - name: Build fdk-aac & FFmpeg Libraries (Static)
         run: |
