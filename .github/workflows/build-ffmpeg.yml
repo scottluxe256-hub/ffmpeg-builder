@@ -52,8 +52,9 @@ jobs:
           export CFLAGS="-O3 -fPIC -march=armv8-a+simd+crypto -ftree-vectorize"
           export CXXFLAGS="$CFLAGS"
           export CPPFLAGS="-I$PREFIX/include"
-          export LDFLAGS="-L$PREFIX/lib"
+          export LDFLAGS="-L$PREFIX/lib -static-libstdc++"
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
           clone() { git clone --depth 1 "$1" "$2"; }
           cmake_android() {
@@ -91,14 +92,14 @@ jobs:
           ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-cli --enable-pic --enable-asm
           make -j$(nproc) && make install
 
-          # 6. x265 (Safe YAML Syntax)
+          # 6. x265
           clone https://github.com/videolan/x265.git "$SRC/x265"
           cmake_android "$SRC/x265/source" "$SRC/x265-b" \
             -DENABLE_SHARED=OFF \
             -DENABLE_CLI=OFF \
             -DENABLE_ASSEMBLY=OFF
           cmake --build "$SRC/x265-b" && cmake --install "$SRC/x265-b"
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm -ldl -pthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lm -ldl -pthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
           # 7. SVT-AV1
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
@@ -153,38 +154,58 @@ jobs:
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
 
           cd "$ROOT"
-          wget -q "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz"
-          tar -xJf ffmpeg-9.0.1.tar.xz
+          wget -q "https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz" || wget -q "https://ffmpeg.org/releases/ffmpeg-6.1.1.tar.xz"
+          tar -xJf ffmpeg-*.tar.xz
+          FFMPEG_DIR=$(ls -d ffmpeg-*/ | head -n 1)
 
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
           FLAGS=(
-            --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile
+            --target-os=android
+            --arch=aarch64
+            --cpu=armv8-a
+            --enable-cross-compile
             --cc="$TOOLCHAIN/bin/aarch64-linux-android29-clang"
             --cxx="$TOOLCHAIN/bin/aarch64-linux-android29-clang++"
-            --ar="$TOOLCHAIN/bin/llvm-ar" --strip="$TOOLCHAIN/bin/llvm-strip"
-            --pkg-config=pkg-config --pkg-config-flags=--static
+            --ar="$TOOLCHAIN/bin/llvm-ar"
+            --strip="$TOOLCHAIN/bin/llvm-strip"
+            --pkg-config=pkg-config
+            --pkg-config-flags=--static
             --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
-            --extra-ldflags="-L$PREFIX/lib"
-            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread"
-            --enable-gpl --enable-static --disable-shared
-            --enable-asm --enable-neon
-            --enable-zlib --enable-libzimg --enable-libx264 --enable-libx265 --enable-libsvtav1
-            --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus
-            --enable-libvorbis --enable-libwebp
+            --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
+            --extra-ldflags="-L$PREFIX/lib -static-libstdc++"
+            --extra-libs="-lm -ldl -lz -llog -landroid -pthread"
+            --enable-static
+            --disable-shared
+            --enable-asm
+            --enable-neon
+            --enable-zlib
+            --enable-libzimg
+            --enable-libx264
+            --enable-libx265
+            --enable-libsvtav1
+            --enable-libaom
+            --enable-libvpx
+            --enable-libmp3lame
+            --enable-libopus
+            --enable-libvorbis
+            --enable-libwebp
+            --enable-jni
+            --enable-mediacodec
           )
 
-          # Build GPL
-          cp -r ffmpeg-9.0.1 ffmpeg-gpl && cd ffmpeg-gpl
-          ./configure "${FLAGS[@]}"
+          # Build GPL Version
+          cp -r "$FFMPEG_DIR" ffmpeg-gpl && cd ffmpeg-gpl
+          ./configure "${FLAGS[@]}" --enable-gpl
           make -j$(nproc)
           mkdir -p "$ROOT/dist/gpl"
           cp ffmpeg "$ROOT/dist/gpl/ffmpeg-gpl"
 
-          # Build Nonfree
+          # Build Nonfree Version
           cd "$ROOT"
-          cp -r ffmpeg-9.0.1 ffmpeg-nonfree && cd ffmpeg-nonfree
-          ./configure "${FLAGS[@]}" --enable-nonfree --enable-libfdk-aac
+          cp -r "$FFMPEG_DIR" ffmpeg-nonfree && cd ffmpeg-nonfree
+          ./configure "${FLAGS[@]}" --enable-gpl --enable-nonfree --enable-libfdk-aac
           make -j$(nproc)
           mkdir -p "$ROOT/dist/nonfree"
           cp ffmpeg "$ROOT/dist/nonfree/ffmpeg-nonfree"
