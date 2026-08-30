@@ -1,0 +1,112 @@
+name: Build FDK-AAC Standalone Executable (Direct MP4 Support)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-standalone-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup RAM Disk Workspace
+        run: |
+          sudo mkdir -p /dev/shm/build_space
+          sudo chown -R $USER:$USER /dev/shm/build_space
+          echo "WORKSPACE=/dev/shm/build_space" >> $GITHUB_ENV
+
+      - name: Setup Android NDK r26b & Tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y pkg-config nasm yasm
+          
+          cd $WORKSPACE
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+
+          NDK_PATH="$WORKSPACE/android-ndk-r26b"
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          API=24
+
+          INSTALL_DIR="$WORKSPACE/fdk_assets"
+          mkdir -p "$INSTALL_DIR"
+          mkdir -p $GITHUB_WORKSPACE/output_arm64
+
+          echo "TARGET_CC=$TOOLCHAIN/bin/aarch64-linux-android${API}-clang" >> $GITHUB_ENV
+          echo "TARGET_CXX=$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++" >> $GITHUB_ENV
+          echo "AR=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
+          echo "RANLIB=$TOOLCHAIN/bin/llvm-ranlib" >> $GITHUB_ENV
+          echo "STRIP=$TOOLCHAIN/bin/llvm-strip" >> $GITHUB_ENV
+          echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "JOBS=$(nproc)" >> $GITHUB_ENV
+
+      # 1. Compile FDK-AAC Static Library
+      - name: Compile libfdk-aac Static Archive
+        run: |
+          cd $WORKSPACE
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
+          cd fdk-aac
+          ./autogen.sh
+          
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
+          ./configure \
+            --host=aarch64-linux-android \
+            --prefix=$INSTALL_DIR \
+            --enable-static \
+            --disable-shared \
+            CFLAGS="-fPIC" CXXFLAGS="-fPIC"
+
+          make -j$JOBS && make install
+
+      # 2. Compile FFmpeg Static Minimal Parser (Demuxer/Decoder Only)
+      - name: Compile FFmpeg Minimal Static Parser
+        run: |
+          cd $WORKSPACE
+          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
+          cd ffmpeg_source
+
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB STRIP=$STRIP
+
+          ./configure \
+            --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
+            --cc=$TARGET_CC --cxx=$TARGET_CXX --as=$TARGET_CC --ar=$AR --ranlib=$RANLIB --strip=$STRIP \
+            --prefix=$INSTALL_DIR \
+            --enable-pic \
+            --disable-asm \
+            --disable-neon \
+            --enable-static --disable-shared \
+            --disable-programs --disable-doc --disable-network \
+            --disable-encoders --disable-muxers --disable-filters \
+            --enable-protocol=file \
+            --enable-demuxer=mov,matroska,aac,mp3,wav \
+            --enable-decoder=aac,mp3,flac,opus,vorbis,pcm_s16le \
+            --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-ldflags="-L$INSTALL_DIR/lib"
+
+          make -j$JOBS install
+
+      # 3. Embed Everything (main.c + libfdk-aac + libavformat/avcodec) into 1 Single Binary
+      - name: Compile Single Embedded Executable Binary
+        run: |
+          cd $GITHUB_WORKSPACE
+          
+          $TARGET_CC -O3 -fPIE -pie \
+            main.c \
+            -I$INSTALL_DIR/include \
+            $INSTALL_DIR/lib/libavformat.a \
+            $INSTALL_DIR/lib/libavcodec.a \
+            $INSTALL_DIR/lib/libswresample.a \
+            $INSTALL_DIR/lib/libavutil.a \
+            $INSTALL_DIR/lib/libfdk-aac.a \
+            -o $GITHUB_WORKSPACE/output_arm64/fdk-aac \
+            -lm -lz -lc++_static
+
+          $STRIP $GITHUB_WORKSPACE/output_arm64/fdk-aac
+
+      # 4. Upload Single Binary Artifact
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdk-aac-direct-binary
+          path: output_arm64/fdk-aac
