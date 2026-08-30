@@ -67,7 +67,7 @@ jobs:
           NDK_CMAKE="$NDK_PATH/build/cmake/android.toolchain.cmake"
           echo "NDK_CMAKE=$NDK_CMAKE" >> $GITHUB_ENV
 
-      # Cache Static Libraries (Keeping v7 so it reuses the fixed soxr build)
+      # Cache Static Libraries (Menggunakan cache v7)
       - name: Cache Compiled Dependencies
         id: cache-deps
         uses: actions/cache@v4
@@ -115,7 +115,7 @@ jobs:
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$JOBS && make install
 
-          # Soxr (Resampler) - Matikan OpenMP agar tidak butuh libomp di Android
+          # Soxr (Resampler)
           cd $WORKSPACE && git clone --depth 1 https://git.code.sf.net/p/soxr/code soxr
           cmake -G "Ninja" -S soxr -B soxr/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
@@ -244,7 +244,6 @@ jobs:
           git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_source
           cd ffmpeg_source
 
-          # ADDED --enable-jni HERE!
           ./configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
             --cc=$TARGET_CC --cxx=$TARGET_CXX --ar=$AR --ranlib=$RANLIB --strip=$STRIP \
@@ -262,7 +261,7 @@ jobs:
 
           make -j$JOBS install
 
-      # 7. BUNDLE EVERYTHING INTO SINGLE LIBFFMPEG.SO
+      # 7. BUNDLE EVERYTHING INTO SINGLE LIBFFMPEG.SO (FIXED LINKER FLAGS)
       - name: Bundle into Single libffmpeg.so
         run: |
           echo "Menggabungkan static libraries jadi satu libffmpeg.so..."
@@ -271,9 +270,11 @@ jobs:
           JPEG_LIB="$INSTALL_DIR/lib/libjpeg.a"
           [ -f "$INSTALL_DIR/lib/libturbojpeg.a" ] && JPEG_LIB="$INSTALL_DIR/lib/libturbojpeg.a"
 
+          # Ditambahkan -Wl,--allow-multiple-definition agar simbol duplikat otomatis di-resolve oleh linker
           $TARGET_CC -shared -o $GITHUB_WORKSPACE/output_arm64/libffmpeg.so \
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
             -I$INSTALL_DIR/include \
+            -Wl,--allow-multiple-definition \
             -Wl,--whole-archive \
             $INSTALL_DIR/lib/libavformat.a \
             $INSTALL_DIR/lib/libavcodec.a \
