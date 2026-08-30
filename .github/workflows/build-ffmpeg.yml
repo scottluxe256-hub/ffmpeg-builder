@@ -22,7 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential autoconf automake libtool pkg-config \
-            git yasm nasm cmake ninja-build wget unzip python3 meson zip
+            git yasm nasm cmake ninja-build wget unzip python3 meson zip binutils
 
       - name: Download Android NDK r26b
         run: |
@@ -101,7 +101,7 @@ jobs:
           cmake --build "$SRC/x265-b" && cmake --install "$SRC/x265-b"
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265\nLibs.private: -lc++_static -lc++abi -lm -ldl -pthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
-          # 7. SVT-AV1 (Latest)
+          # 7. SVT-AV1
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cmake_android "$SRC/SVT-AV1" "$SRC/SVT-AV1-b" -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           cmake --build "$SRC/SVT-AV1-b" && cmake --install "$SRC/SVT-AV1-b"
@@ -179,6 +179,7 @@ jobs:
             --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread"
             --enable-static
             --disable-shared
+            --disable-doc
             --enable-asm
             --enable-neon
             --enable-zlib
@@ -201,10 +202,10 @@ jobs:
           ./configure "${FLAGS[@]}" --enable-gpl
           make -j$(nproc)
           
-          # Verifikasi otomatis GPL
-          ./ffmpeg -buildconf > buildconf-gpl.txt
+          # Verifikasi otomatis via strings (Aman untuk Cross-compiled Binary)
+          strings ffmpeg | grep -E "configuration:" > gpl-config.txt
           for lib in "libaom" "libwebp" "libzimg"; do
-            if ! grep -q "--enable-$lib" buildconf-gpl.txt; then
+            if ! grep -q "--enable-$lib" gpl-config.txt; then
               echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI GPL BUILD!"
               exit 1
             fi
@@ -219,10 +220,10 @@ jobs:
           ./configure "${FLAGS[@]}" --enable-gpl --enable-nonfree --enable-libfdk-aac
           make -j$(nproc)
 
-          # Verifikasi otomatis Nonfree
-          ./ffmpeg -buildconf > buildconf-nonfree.txt
+          # Verifikasi otomatis via strings (Nonfree)
+          strings ffmpeg | grep -E "configuration:" > nonfree-config.txt
           for lib in "libaom" "libwebp" "libzimg"; do
-            if ! grep -q "--enable-$lib" buildconf-nonfree.txt; then
+            if ! grep -q "--enable-$lib" nonfree-config.txt; then
               echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI NONFREE BUILD!"
               exit 1
             fi
