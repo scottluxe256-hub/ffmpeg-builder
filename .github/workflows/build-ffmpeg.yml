@@ -1,10 +1,7 @@
-name: Build FFmpeg Static Android ARM64 - 14 Libraries
+name: Build FFmpeg Static Zip
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build-android-static:
@@ -13,11 +10,8 @@ jobs:
 
     env:
       NDK_VERSION: r26b
-      NDK_ZIP: android-ndk-r26b-linux.zip
-      NDK_DIR: android-ndk-r26b
       INSTALL_DIR: ${{ github.workspace }}/build_assets
       API: "29"
-      CACHE_VERSION: v17-ffmpeg901-robust
 
     steps:
       - name: Checkout Repository
@@ -25,473 +19,177 @@ jobs:
 
       - name: Install Build Dependencies
         run: |
-          set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
             build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo cmake ninja-build wget unzip \
-            python3 python3-pip meson ccache curl
-
-      - name: Cache Android NDK
-        id: cache-ndk
-        uses: actions/cache@v4
-        with:
-          path: |
-            android-ndk-r26b
-            android-ndk-r26b-linux.zip
-          key: ${{ runner.os }}-android-ndk-r26b-${{ env.CACHE_VERSION }}
-          restore-keys: |
-            ${{ runner.os }}-android-ndk-r26b-
+            git yasm nasm cmake ninja-build wget unzip python3 meson zip
 
       - name: Download Android NDK r26b
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
-          set -euxo pipefail
-          wget -q --show-progress \
-            https://dl.google.com/android/repository/android-ndk-r26b-linux.zip \
-            -O android-ndk-r26b-linux.zip
-          unzip -o -q android-ndk-r26b-linux.zip
-
-      - name: Setup Environment & Toolchain Wrappers
-        run: |
-          set -euxo pipefail
-
-          NDK_PATH="$GITHUB_WORKSPACE/android-ndk-r26b"
-          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-          BIN_WRAPPER="$GITHUB_WORKSPACE/bin_wrapper"
-
-          echo "NDK_PATH=$NDK_PATH" >> "$GITHUB_ENV"
-          echo "TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
-          echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> "$GITHUB_ENV"
-
-          mkdir -p "$GITHUB_WORKSPACE/build_assets/lib/pkgconfig"
-          mkdir -p "$BIN_WRAPPER"
-
-          for tool in ar as nm ranlib strip strings objcopy readelf; do
-            ln -sf "$TOOLCHAIN/bin/llvm-$tool" "$BIN_WRAPPER/aarch64-linux-android-$tool"
-          done
-
-          ln -sf "$TOOLCHAIN/bin/aarch64-linux-android29-clang" "$BIN_WRAPPER/aarch64-linux-android-gcc"
-          ln -sf "$TOOLCHAIN/bin/aarch64-linux-android29-clang++" "$BIN_WRAPPER/aarch64-linux-android-g++"
-          ln -sf "$TOOLCHAIN/bin/ld.lld" "$BIN_WRAPPER/aarch64-linux-android-ld"
-
-          echo "$BIN_WRAPPER" >> "$GITHUB_PATH"
-
-          echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_LIBDIR=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "PATH=$BIN_WRAPPER:$TOOLCHAIN/bin:$PATH" >> "$GITHUB_ENV"
-
-      - name: Configure CCache
-        run: |
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
-          mkdir -p "$HOME/.cache/ccache"
-          ccache --set-config=max_size=5G
-          ccache --set-config=compression=true
-
-      - name: Cache External Libraries and CCache
-        id: cache-libs
-        uses: actions/cache@v4
-        with:
-          path: |
-            build_assets
-            ~/.cache/ccache
-          key: ${{ runner.os }}-android-arm64-libs-${{ env.CACHE_VERSION }}
-          restore-keys: |
-            ${{ runner.os }}-android-arm64-libs-
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip -O ndk.zip
+          unzip -o -q ndk.zip
+          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> "$GITHUB_ENV"
 
       - name: Build 14 External Libraries
-        if: steps.cache-libs.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euxo pipefail
-
           ROOT="$GITHUB_WORKSPACE"
           SRC="$ROOT/build_sources"
           PREFIX="$INSTALL_DIR"
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
           HOST="aarch64-linux-android"
 
-          rm -rf "$SRC"
           mkdir -p "$SRC" "$PREFIX/include" "$PREFIX/lib/pkgconfig"
 
           export CC="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang"
           export CXX="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++"
           export AR="$TOOLCHAIN/bin/llvm-ar"
-          export AS="$TOOLCHAIN/bin/llvm-as"
           export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
           export STRIP="$TOOLCHAIN/bin/llvm-strip"
-          export NM="$TOOLCHAIN/bin/llvm-nm"
-          export LD="$TOOLCHAIN/bin/ld.lld"
 
           export CFLAGS="-O3 -fPIC -march=armv8-a+simd"
           export CXXFLAGS="$CFLAGS"
           export CPPFLAGS="-I$PREFIX/include"
           export LDFLAGS="-L$PREFIX/lib"
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
-          export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
-          clone() {
-            git clone --depth 1 "$1" "$2"
-          }
-
+          clone() { git clone --depth 1 "$1" "$2"; }
           cmake_android() {
-            cmake -S "$1" -B "$2" \
-              -G Ninja \
+            cmake -S "$1" -B "$2" -G Ninja \
               -DCMAKE_TOOLCHAIN_FILE="$NDK_PATH/build/cmake/android.toolchain.cmake" \
-              -DANDROID_ABI=arm64-v8a \
-              -DANDROID_PLATFORM=android-${API} \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DBUILD_SHARED_LIBS=OFF \
-              -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-              -DCMAKE_INSTALL_LIBDIR=lib \
-              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-              "${@:3}"
+              -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-${API} \
+              -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib "${@:3}"
           }
 
-          echo "=== [1/14] zlib ==="
+          # 1. zlib
           clone https://github.com/madler/zlib.git "$SRC/zlib"
-          cmake_android "$SRC/zlib" "$SRC/zlib-build"
-          cmake --build "$SRC/zlib-build" --parallel "$(nproc)"
-          cmake --install "$SRC/zlib-build"
+          cmake_android "$SRC/zlib" "$SRC/zlib-b"
+          cmake --build "$SRC/zlib-b" && cmake --install "$SRC/zlib-b"
 
-          echo "=== [2/14] libogg ==="
+          # 2. ogg
           clone https://github.com/xiph/ogg.git "$SRC/ogg"
-          cmake_android "$SRC/ogg" "$SRC/ogg-build"
-          cmake --build "$SRC/ogg-build" --parallel "$(nproc)"
-          cmake --install "$SRC/ogg-build"
+          cmake_android "$SRC/ogg" "$SRC/ogg-b"
+          cmake --build "$SRC/ogg-b" && cmake --install "$SRC/ogg-b"
 
-          echo "=== [3/14] libpng ==="
+          # 3. libpng
           clone https://github.com/pnggroup/libpng.git "$SRC/libpng"
-          cmake_android "$SRC/libpng" "$SRC/libpng-build" \
-            -DPNG_SHARED=OFF \
-            -DPNG_STATIC=ON \
-            -DPNG_TESTS=OFF \
-            -DPNG_TOOLS=OFF \
-            -DPNG_EXECUTABLES=OFF \
-            -DPNG_ARM_NEON=on
-          cmake --build "$SRC/libpng-build" --parallel "$(nproc)"
-          cmake --install "$SRC/libpng-build"
+          cmake_android "$SRC/libpng" "$SRC/libpng-b" -DPNG_SHARED=OFF -DPNG_STATIC=ON -DPNG_TESTS=OFF -DPNG_TOOLS=OFF -DPNG_EXECUTABLES=OFF -DPNG_ARM_NEON=on
+          cmake --build "$SRC/libpng-b" && cmake --install "$SRC/libpng-b"
 
-          echo "=== [4/14] zimg ==="
+          # 4. zimg
           clone https://github.com/sekrit-twc/zimg.git "$SRC/zimg"
-          cd "$SRC/zimg"
-          git submodule update --init --recursive
-          ./autogen.sh
-          ./configure \
-            --host="$HOST" \
-            --prefix="$PREFIX" \
-            --enable-static \
-            --disable-shared \
-            --disable-dependency-tracking \
-            CC="$CC" CXX="$CXX" AR="$AR" RANLIB="$RANLIB" \
-            CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" \
-            CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
-          make -j"$(nproc)"
-          make install
+          cd "$SRC/zimg" && git submodule update --init --recursive && ./autogen.sh
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
 
-          echo "=== [5/14] x264 ==="
+          # 5. x264
           clone https://code.videolan.org/videolan/x264.git "$SRC/x264"
           cd "$SRC/x264"
-          ./configure \
-            --host="$HOST" \
-            --sysroot="$TOOLCHAIN/sysroot" \
-            --prefix="$PREFIX" \
-            --enable-static \
-            --disable-cli \
-            --enable-pic \
-            --disable-asm \
-            --cc="$CC" \
-            --ar="$AR" \
-            --strip="$STRIP" \
-            --extra-cflags="$CFLAGS"
-          make -j"$(nproc)"
-          make install
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-cli --enable-pic --disable-asm
+          make -j$(nproc) && make install
 
-          echo "=== [6/14] x265 ==="
+          # 6. x265
           clone https://github.com/videolan/x265.git "$SRC/x265"
-          cmake_android "$SRC/x265/source" "$SRC/x265-build" \
-            -DENABLE_SHARED=OFF \
-            -DENABLE_CLI=OFF \
-            -DEXPORT_C_API=ON \
-            -DENABLE_ASSEMBLY=OFF \
-            -DENABLE_PIC=ON \
-            -DCROSS_COMPILE_ARM=1
-          cmake --build "$SRC/x265-build" --parallel "$(nproc)"
-          cmake --install "$SRC/x265-build"
+          cmake_android "$SRC/x265/source" "$SRC/x265-b" -DENABLE_SHARED=OFF -DENABLE_CLI=OFF
+          cmake --build "$SRC/x265-b" && cmake --install "$SRC/x265-b"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
-
-          echo "=== [7/14] SVT-AV1 ==="
+          # 7. SVT-AV1
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
-          cd "$SRC/SVT-AV1"
-          git fetch --depth 1 origin refs/tags/v4.2.0:refs/tags/v4.2.0
-          git checkout -q v4.2.0
-          cmake_android "$SRC/SVT-AV1" "$SRC/SVT-AV1-build" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_APPS=OFF \
-            -DBUILD_TESTING=OFF
-          cmake --build "$SRC/SVT-AV1-build" --parallel "$(nproc)"
-          cmake --install "$SRC/SVT-AV1-build"
+          cmake_android "$SRC/SVT-AV1" "$SRC/SVT-AV1-b" -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
+          cmake --build "$SRC/SVT-AV1-b" && cmake --install "$SRC/SVT-AV1-b"
 
-          echo "=== [8/14] libaom ==="
+          # 8. libaom
           clone https://aomedia.googlesource.com/aom "$SRC/aom"
-          cmake_android "$SRC/aom" "$SRC/aom-build" \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_EXAMPLES=OFF \
-            -DENABLE_TOOLS=OFF \
-            -DENABLE_DOCS=OFF
-          cmake --build "$SRC/aom-build" --parallel "$(nproc)"
-          cmake --install "$SRC/aom-build"
+          cmake_android "$SRC/aom" "$SRC/aom-b" -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TOOLS=OFF
+          cmake --build "$SRC/aom-b" && cmake --install "$SRC/aom-b"
 
-          echo "=== [9/14] libvpx ==="
+          # 9. libvpx
           clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
-          mkdir -p "$SRC/libvpx-build"
-          cd "$SRC/libvpx-build"
-          CC="$CC" CXX="$CXX" AR="$AR" LD="$LD" ../libvpx/configure \
-            --target=generic-gnu \
-            --prefix="$PREFIX" \
-            --disable-shared \
-            --enable-static \
-            --disable-examples \
-            --disable-tools \
-            --disable-unit-tests \
-            --disable-docs \
-            --enable-pic \
-            --extra-cflags="$CFLAGS"
-          make -j"$(nproc)"
-          make install
+          mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
+          ../libvpx/configure --target=generic-gnu --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
+          make -j$(nproc) && make install
 
-          echo "=== [10/14] libmp3lame ==="
+          # 10. mp3lame
           clone https://github.com/lameproject/lame.git "$SRC/lame"
           cd "$SRC/lame"
-          ./configure \
-            --host="$HOST" \
-            --prefix="$PREFIX" \
-            --enable-static \
-            --disable-shared \
-            --disable-frontend \
-            CC="$CC" CFLAGS="$CFLAGS" \
-            CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
-          make -j"$(nproc)"
-          make install
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
+          make -j$(nproc) && make install
 
-          echo "=== [11/14] libopus ==="
+          # 11. opus
           clone https://github.com/xiph/opus.git "$SRC/opus"
-          cmake_android "$SRC/opus" "$SRC/opus-build" \
-            -DOPUS_BUILD_SHARED_LIBRARY=OFF \
-            -DOPUS_BUILD_TESTING=OFF \
-            -DOPUS_BUILD_PROGRAMS=OFF \
-            -DOPUS_INSTALL_PKG_CONFIG_MODULE=ON \
-            -DOPUS_INSTALL_CMAKE_CONFIG_MODULE=OFF \
-            -DOPUS_FORTIFY_SOURCE=OFF
-          cmake --build "$SRC/opus-build" --parallel "$(nproc)"
-          cmake --install "$SRC/opus-build"
+          cmake_android "$SRC/opus" "$SRC/opus-b" -DOPUS_BUILD_SHARED_LIBRARY=OFF -DOPUS_INSTALL_PKG_CONFIG_MODULE=ON
+          cmake --build "$SRC/opus-b" && cmake --install "$SRC/opus-b"
 
-          echo "=== [12/14] libvorbis ==="
+          # 12. vorbis
           clone https://github.com/xiph/vorbis.git "$SRC/vorbis"
-          cd "$SRC/vorbis"
-          ./autogen.sh
-          ./configure \
-            --host="$HOST" \
-            --prefix="$PREFIX" \
-            --enable-static \
-            --disable-shared \
-            --disable-dependency-tracking \
-            CC="$CC" AR="$AR" RANLIB="$RANLIB" CFLAGS="$CFLAGS" \
-            CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS" \
-            OGG_CFLAGS="-I$PREFIX/include" \
-            OGG_LIBS="-L$PREFIX/lib -logg"
-          make -j"$(nproc)"
-          make install
+          cd "$SRC/vorbis" && ./autogen.sh
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
+          make -j$(nproc) && make install
 
-          echo "=== [13/14] libwebp ==="
+          # 13. webp
           clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
-          cmake_android "$SRC/libwebp" "$SRC/libwebp-build" \
-            -DWEBP_BUILD_ANIM_UTILS=OFF \
-            -DWEBP_BUILD_CWEBP=OFF \
-            -DWEBP_BUILD_DWEBP=OFF \
-            -DWEBP_BUILD_EXTRAS=OFF \
-            -DWEBP_BUILD_GIF2WEBP=OFF \
-            -DWEBP_BUILD_IMG2WEBP=OFF \
-            -DWEBP_BUILD_VWEBP=OFF \
-            -DWEBP_BUILD_WEBPMUX=OFF \
-            -DWEBP_BUILD_WEBPINFO=OFF \
-            -DWEBP_BUILD_TESTS=OFF
-          cmake --build "$SRC/libwebp-build" --parallel "$(nproc)"
-          cmake --install "$SRC/libwebp-build"
+          cmake_android "$SRC/libwebp" "$SRC/libwebp-b" -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF
+          cmake --build "$SRC/libwebp-b" && cmake --install "$SRC/libwebp-b"
 
-          echo "=== [14/14] libfdk-aac ==="
-          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
-          cd "$SRC/fdk-aac"
-          ./autogen.sh
-          ./configure \
-            --host="$HOST" \
-            --prefix="$PREFIX" \
-            --enable-static \
-            --disable-shared \
-            CC="$CC" CXX="$CXX" AR="$AR" RANLIB="$RANLIB" \
-            CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" \
-            CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
-          make -j"$(nproc)"
-          make install
+          # 14. fdk-aac
+          clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
+          cd "$SRC/fdk-aac" && ./autogen.sh
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
 
-          echo "=== Validasi Hasil Build External Libraries ==="
-          test -f "$PREFIX/lib/libz.a"
-          test -f "$PREFIX/lib/libogg.a"
-          test -f "$PREFIX/lib/libpng.a"
-          test -f "$PREFIX/lib/libx264.a"
-          test -f "$PREFIX/lib/libx265.a"
-          test -f "$PREFIX/lib/libSvtAv1Enc.a"
-          test -f "$PREFIX/lib/libaom.a"
-          test -f "$PREFIX/lib/libvpx.a"
-          test -f "$PREFIX/lib/libmp3lame.a"
-          test -f "$PREFIX/lib/libopus.a"
-          test -f "$PREFIX/lib/libvorbis.a"
-          test -f "$PREFIX/lib/libwebp.a"
-          test -f "$PREFIX/lib/libfdk-aac.a"
-
-          touch "$PREFIX/.external-libs-complete"
-
-      - name: Validate cached external libraries
+      - name: Build FFmpeg Binaries
         shell: bash
         run: |
           set -euxo pipefail
-          PREFIX="$INSTALL_DIR"
-
-          test -f "$PREFIX/.external-libs-complete"
-          test -f "$PREFIX/lib/libz.a"
-          test -f "$PREFIX/lib/libogg.a"
-          test -f "$PREFIX/lib/libpng.a"
-          test -f "$PREFIX/lib/libx264.a"
-          test -f "$PREFIX/lib/libx265.a"
-          test -f "$PREFIX/lib/libSvtAv1Enc.a"
-          test -f "$PREFIX/lib/libaom.a"
-          test -f "$PREFIX/lib/libvpx.a"
-          test -f "$PREFIX/lib/libmp3lame.a"
-          test -f "$PREFIX/lib/libopus.a"
-          test -f "$PREFIX/lib/libvorbis.a"
-          test -f "$PREFIX/lib/libwebp.a"
-          test -f "$PREFIX/lib/libfdk-aac.a"
-
-      - name: Build FFmpeg - GPL and Nonfree
-        shell: bash
-        run: |
-          set -euxo pipefail
-
           ROOT="$GITHUB_WORKSPACE"
           PREFIX="$INSTALL_DIR"
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-          FFMPEG_VERSION="9.0.1"
 
-          rm -rf "$ROOT/ffmpeg_source" "$ROOT/out"
-          mkdir -p "$ROOT/ffmpeg_source" "$ROOT/out"
-
-          cd "$ROOT/ffmpeg_source"
-
-          wget -q --show-progress \
-            "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
-            -O "ffmpeg-${FFMPEG_VERSION}.tar.xz"
-
-          tar -xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"
+          cd "$ROOT"
+          wget -q "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz"
+          tar -xJf ffmpeg-9.0.1.tar.xz
 
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
-          export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
-          COMMON_FLAGS=(
-            --target-os=android
-            --arch=aarch64
-            --cpu=armv8-a
-            --enable-cross-compile
+          FLAGS=(
+            --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile
             --cc="$TOOLCHAIN/bin/aarch64-linux-android29-clang"
             --cxx="$TOOLCHAIN/bin/aarch64-linux-android29-clang++"
-            --ar="$TOOLCHAIN/bin/llvm-ar"
-            --ranlib="$TOOLCHAIN/bin/llvm-ranlib"
-            --strip="$TOOLCHAIN/bin/llvm-strip"
-            --nm="$TOOLCHAIN/bin/llvm-nm"
-            --pkg-config=pkg-config
-            --pkg-config-flags=--static
-            --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd"
-            --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd"
+            --ar="$TOOLCHAIN/bin/llvm-ar" --strip="$TOOLCHAIN/bin/llvm-strip"
+            --pkg-config=pkg-config --pkg-config-flags=--static
+            --extra-cflags="-I$PREFIX/include -O3 -fPIC"
             --extra-ldflags="-L$PREFIX/lib"
             --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread"
-            --enable-gpl
-            --enable-asm
-            --enable-inline-asm
-            --enable-neon
-            --enable-jni
-            --enable-mediacodec
-            --enable-zlib
-            --enable-libzimg
-            --enable-libx264
-            --enable-libx265
-            --enable-libsvtav1
-            --enable-libaom
-            --enable-libvpx
-            --enable-libmp3lame
-            --enable-libopus
-            --enable-libvorbis
-            --enable-libwebp
-            --disable-doc
-            --disable-debug
-            --enable-static
-            --disable-shared
+            --enable-gpl --enable-static --disable-shared
+            --enable-zlib --enable-libpng --enable-libzimg --enable-libx264 --enable-libx265 --enable-libsvtav1
+            --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus
+            --enable-libvorbis --enable-libwebp
           )
 
-          echo "=== BUILD 1/2: FFmpeg GPL ==="
-          rm -rf "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-gpl"
-          cp -a "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}" "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-gpl"
-          cd "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-gpl"
+          # Build GPL (Hanya Ambil File Executable ffmpeg)
+          cp -r ffmpeg-9.0.1 ffmpeg-gpl && cd ffmpeg-gpl
+          ./configure "${FLAGS[@]}"
+          make -j$(nproc)
+          mkdir -p "$ROOT/dist/gpl"
+          cp ffmpeg "$ROOT/dist/gpl/ffmpeg-gpl"
 
-          ./configure "${COMMON_FLAGS[@]}" --prefix="$ROOT/out/ffmpeg-android-aarch64-gpl"
-          make -j"$(nproc)"
-          make install
+          # Build Nonfree (Hanya Ambil File Executable ffmpeg)
+          cd "$ROOT"
+          cp -r ffmpeg-9.0.1 ffmpeg-nonfree && cd ffmpeg-nonfree
+          ./configure "${FLAGS[@]}" --enable-nonfree --enable-libfdk-aac
+          make -j$(nproc)
+          mkdir -p "$ROOT/dist/nonfree"
+          cp ffmpeg "$ROOT/dist/nonfree/ffmpeg-nonfree"
 
-          GPL_FFMPEG="$ROOT/out/ffmpeg-android-aarch64-gpl/bin/ffmpeg"
-          test -x "$GPL_FFMPEG"
+          # Packing ke ZIP
+          cd "$ROOT/dist"
+          zip -j ffmpeg-android-arm64-binaries.zip gpl/ffmpeg-gpl nonfree/ffmpeg-nonfree
 
-          echo "=== BUILD 2/2: FFmpeg NONFREE ==="
-          rm -rf "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-nonfree"
-          cp -a "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}" "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-nonfree"
-          cd "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-nonfree"
-
-          ./configure "${COMMON_FLAGS[@]}" --enable-nonfree --enable-libfdk-aac --prefix="$ROOT/out/ffmpeg-android-aarch64-nonfree"
-          make -j"$(nproc)"
-          make install
-
-          NONFREE_FFMPEG="$ROOT/out/ffmpeg-android-aarch64-nonfree/bin/ffmpeg"
-          test -x "$NONFREE_FFMPEG"
-
-      - name: Package GPL and Nonfree Artifacts
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          mkdir -p "$GITHUB_WORKSPACE/out/packages"
-
-          tar -C "$GITHUB_WORKSPACE/out" \
-            -czf "$GITHUB_WORKSPACE/out/packages/ffmpeg-android-aarch64-gpl.tar.gz" \
-            ffmpeg-android-aarch64-gpl
-
-          tar -C "$GITHUB_WORKSPACE/out" \
-            -czf "$GITHUB_WORKSPACE/out/packages/ffmpeg-android-aarch64-nonfree.tar.gz" \
-            ffmpeg-android-aarch64-nonfree
-
-          sha256sum \
-            "$GITHUB_WORKSPACE/out/packages/ffmpeg-android-aarch64-gpl.tar.gz" \
-            "$GITHUB_WORKSPACE/out/packages/ffmpeg-android-aarch64-nonfree.tar.gz"
-
-      - name: Upload GPL Artifact
+      - name: Upload Zip Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-aarch64-gpl
-          path: ${{ github.workspace }}/out/packages/ffmpeg-android-aarch64-gpl.tar.gz
-          if-no-files-found: error
-
-      - name: Upload Nonfree Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-android-aarch64-nonfree
-          path: ${{ github.workspace }}/out/packages/ffmpeg-android-aarch64-nonfree.tar.gz
-          if-no-files-found: error
+          name: ffmpeg-binaries-zip
+          path: ${{ github.workspace }}/dist/ffmpeg-android-arm64-binaries.zip
