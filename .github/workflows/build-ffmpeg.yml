@@ -202,10 +202,10 @@ jobs:
           ./configure "${FLAGS[@]}" --enable-gpl
           make -j$(nproc)
           
-          # Verifikasi otomatis via strings (Aman untuk Cross-compiled Binary)
+          # Verifikasi otomatis via strings (GPL)
           strings ffmpeg | grep -E "configuration:" > gpl-config.txt
           for lib in "libaom" "libwebp" "libzimg"; do
-            if ! grep -q "--enable-$lib" gpl-config.txt; then
+            if ! grep -q -e "--enable-$lib" gpl-config.txt; then
               echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI GPL BUILD!"
               exit 1
             fi
@@ -223,7 +223,7 @@ jobs:
           # Verifikasi otomatis via strings (Nonfree)
           strings ffmpeg | grep -E "configuration:" > nonfree-config.txt
           for lib in "libaom" "libwebp" "libzimg"; do
-            if ! grep -q "--enable-$lib" nonfree-config.txt; then
+            if ! grep -q -e "--enable-$lib" nonfree-config.txt; then
               echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI NONFREE BUILD!"
               exit 1
             fi
