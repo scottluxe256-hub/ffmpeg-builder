@@ -422,7 +422,6 @@ jobs:
             --enable-jni
             --enable-mediacodec
             --enable-zlib
-            --enable-libpng
             --enable-libzimg
             --enable-libx264
             --enable-libx265
@@ -462,7 +461,7 @@ jobs:
 
           NONFREE_FFMPEG="$ROOT/out/ffmpeg-android-aarch64-nonfree/bin/ffmpeg"
           test -x "$NONFREE_FFMPEG"
-
+          
       - name: Package GPL and Nonfree Artifacts
         shell: bash
         run: |
