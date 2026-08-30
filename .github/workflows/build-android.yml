@@ -63,16 +63,10 @@ jobs:
           echo "RANLIB=$TOOLCHAIN/bin/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/bin/llvm-strip" >> $GITHUB_ENV
 
-          # Generate global android_toolchain.cmake di awal
-          cat << EOF > $WORKSPACE/android_toolchain.cmake
-          set(CMAKE_SYSTEM_NAME Android)
-          set(CMAKE_SYSTEM_VERSION ${API})
-          set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)
-          set(CMAKE_ANDROID_NDK ${NDK_PATH})
-          set(CMAKE_C_COMPILER ${TARGET_CC})
-          set(CMAKE_CXX_COMPILER ${TARGET_CXX})
-          EOF
-          
+          # NDK Official CMake Toolchain File
+          NDK_CMAKE="$NDK_PATH/build/cmake/android.toolchain.cmake"
+          echo "NDK_CMAKE=$NDK_CMAKE" >> $GITHUB_ENV
+
       # Cache Static Libraries
       - name: Cache Compiled Dependencies
         id: cache-deps
@@ -81,7 +75,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v2-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v3-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -124,7 +118,9 @@ jobs:
           # Soxr (Resampler)
           cd $WORKSPACE && git clone --depth 1 https://git.code.sf.net/p/soxr/code soxr
           cmake -G "Ninja" -S soxr -B soxr/build \
-            -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/android_toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF
           ninja -C soxr/build install
 
@@ -139,20 +135,17 @@ jobs:
           ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-cli --enable-pic
           make -j$JOBS && make install
 
-          # Toolchain CMake file
-          cat << EOF > $WORKSPACE/android_toolchain.cmake
-          set(CMAKE_SYSTEM_NAME Android)
-          set(CMAKE_SYSTEM_VERSION 24)
-          set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)
-          set(CMAKE_ANDROID_NDK $NDK_PATH)
-          set(CMAKE_C_COMPILER $TARGET_CC)
-          set(CMAKE_CXX_COMPILER $TARGET_CXX)
-          EOF
-
-          # x265
+          # x265 (Fixed Assembly Flag & NDK Toolchain)
           cd $WORKSPACE && git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git x265
           rm -rf x265/.git && echo "3.5" > x265/source/VERSION
-          cmake -G "Ninja" -S x265/source -B x265/build -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/android_toolchain.cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCMAKE_INSTALL_LIBDIR=lib -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON
+          cmake -G "Ninja" -S x265/source -B x265/build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_ASSEMBLY=OFF \
+            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON
           ninja -C x265/build install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265 video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lstdc++ -lm\nCflags: -I\${includedir}\n" "$INSTALL_DIR" > $INSTALL_DIR/lib/pkgconfig/x265.pc
 
@@ -167,12 +160,20 @@ jobs:
         run: |
           # SVT-AV1
           cd $WORKSPACE && git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
-          cmake -G "Ninja" -S SVT-AV1 -B SVT-AV1/build -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/android_toolchain.cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
+          cmake -G "Ninja" -S SVT-AV1 -B SVT-AV1/build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           ninja -C SVT-AV1/build install
 
           # libaom
           cd $WORKSPACE && git clone --depth 1 https://aomedia.googlesource.com/aom
-          cmake -G "Ninja" -S aom -B aom/build -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/android_toolchain.cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_SHARED_LIBS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TESTS=OFF -DENABLE_DOCS=OFF
+          cmake -G "Ninja" -S aom -B aom/build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_SHARED_LIBS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TESTS=OFF -DENABLE_DOCS=OFF
           ninja -C aom/build install
 
           # rav1e (Rust)
@@ -196,37 +197,55 @@ jobs:
           meson setup dav1d/build dav1d --cross-file $WORKSPACE/cross_android.meson --prefix $INSTALL_DIR --default-library static -Denable_tools=false -Denable_tests=false
           ninja -C dav1d/build install
 
-      # 5. IMAGE & SUBTITLE LIBRARIES (WEBP, PNG, JPEG-TURBO, ZIMG, FREETYPE, LIBASS)
+      # 5. IMAGE & SUBTITLE LIBRARIES
       - name: Build Image & Subtitle Libraries
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           # libwebp
           cd $WORKSPACE && git clone --depth 1 https://chromium.googlesource.com/webm/libwebp && cd libwebp
-          cmake -G "Ninja" -S . -B build -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/android_toolchain.cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF
+          cmake -G "Ninja" -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF
           ninja -C build install
 
           # libpng
           cd $WORKSPACE && git clone --depth 1 https://github.com/pnggroup/libpng.git && cd libpng
-          cmake -G "Ninja" -S . -B build -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/android_toolchain.cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DPNG_SHARED=OFF
+          cmake -G "Ninja" -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DPNG_SHARED=OFF
           ninja -C build install
 
           # libjpeg-turbo
           cd $WORKSPACE && git clone --depth 1 https://github.com/libjpeg-turbo/libjpeg-turbo.git && cd libjpeg-turbo
-          cmake -G "Ninja" -S . -B build -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/android_toolchain.cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DENABLE_SHARED=OFF
+          cmake -G "Ninja" -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DENABLE_SHARED=OFF
           ninja -C build install
 
           # zimg
           cd $WORKSPACE && git clone --recursive --depth 1 https://github.com/sekrit-twc/zimg.git && cd zimg
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$JOBS && make install
 
           # FreeType
           cd $WORKSPACE && git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git && cd freetype
-          cmake -G "Ninja" -S . -B build -DCMAKE_TOOLCHAIN_FILE=$WORKSPACE/android_toolchain.cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF
+          cmake -G "Ninja" -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF
           ninja -C build install
 
           # libass
           cd $WORKSPACE && git clone --depth 1 https://github.com/libass/libass.git && cd libass
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$JOBS && make install
 
