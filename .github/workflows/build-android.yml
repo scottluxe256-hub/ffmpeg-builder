@@ -242,7 +242,7 @@ jobs:
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
-      # 6. BUILD FFMPEG STATIC WITH -fPIC ENFORCED
+      # 6. BUILD FFMPEG STATIC WITH FULL PIC ENFORCED
       - name: Build FFmpeg Static Libraries
         run: |
           cd $WORKSPACE
@@ -253,8 +253,9 @@ jobs:
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
             --cc=$TARGET_CC --cxx=$TARGET_CXX --ar=$AR --ranlib=$RANLIB --strip=$STRIP \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
-            --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
-            --extra-cxxflags="-fPIC" \
+            --extra-cflags="-I$INSTALL_DIR/include -fPIC -DPIC" \
+            --extra-cxxflags="-fPIC -DPIC" \
+            --extra-asflags="-fPIC -DPIC" \
             --extra-ldflags="-L$INSTALL_DIR/lib -lm -lstdc++" \
             --prefix=$INSTALL_DIR \
             --enable-pic \
@@ -267,7 +268,7 @@ jobs:
           || { echo "----- ffbuild/config.log -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$JOBS install
-
+          
       # 7. LINK EVERYTHING INTO MONOLITHIC LIBFFMPEG.SO
       - name: Bundle into Single Monolithic libffmpeg.so
         run: |
