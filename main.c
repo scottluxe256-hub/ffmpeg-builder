@@ -104,14 +104,14 @@ int main(int argc, char *argv[]) {
     aacEncoder_SetParam(hAac, AACENC_CHANNELMODE, MODE_2);
     aacEncoder_SetParam(hAac, AACENC_TRANSMUX, 2); // ADTS Stream
 
-    // LOGIKA PENENTUAN MODE: CBR VS VBR
+    // LOGIKA PENENTUAN MODE: CBR VS VBR (PERBAIKAN NAMA KONSTANTA)
     if (vbr_mode >= 1 && vbr_mode <= 5) {
         // Jika flag -vbr diisi (1-5), gunakan VBR Mode!
-        aacEncoder_SetParam(hAac, AACENC_BITRATE_MODE, vbr_mode);
+        aacEncoder_SetParam(hAac, AACENC_BITRATEMODE, vbr_mode);
         printf("[Engine] Running Mode: VBR (Quality Level: %d)\n", vbr_mode);
     } else {
         // Jika tidak, panggil fungsi CBR Murni!
-        aacEncoder_SetParam(hAac, AACENC_BITRATE_MODE, 0);
+        aacEncoder_SetParam(hAac, AACENC_BITRATEMODE, 0);
         aacEncoder_SetParam(hAac, AACENC_BITRATE, bitrate);
         printf("[Engine] Running Mode: CBR (Bitrate: %d bps)\n", bitrate);
     }
