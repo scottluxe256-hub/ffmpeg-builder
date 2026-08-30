@@ -75,7 +75,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v5-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v6-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -246,7 +246,7 @@ jobs:
             --cc=$TARGET_CC --cxx=$TARGET_CXX --ar=$AR --ranlib=$RANLIB --strip=$STRIP \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
-            --extra-ldflags="-L$INSTALL_DIR/lib" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -lm -lstdc++" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
             --enable-gpl --disable-nonfree \
