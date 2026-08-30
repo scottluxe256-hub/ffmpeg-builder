@@ -197,38 +197,36 @@ jobs:
             --enable-mediacodec
           )
 
-          # Build GPL Version
+          # --- Build GPL Version ---
           cp -r ffmpeg-9.0.1 ffmpeg-gpl && cd ffmpeg-gpl
           ./configure "${FLAGS[@]}" --enable-gpl
-          make -j$(nproc)
-          
-          # Verifikasi otomatis via strings (GPL)
-          strings ffmpeg | grep -E "configuration:" > gpl-config.txt
-          for lib in "libaom" "libwebp" "libzimg"; do
-            if ! grep -q -e "--enable-$lib" gpl-config.txt; then
-              echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI GPL BUILD!"
+
+          # Verifikasi langsung dari file ffbuild/config.mak
+          for lib in "CONFIG_LIBAOM=yes" "CONFIG_LIBWEBP=yes" "CONFIG_LIBZIMG=yes"; do
+            if ! grep -q "$lib" ffbuild/config.mak; then
+              echo "CRITICAL ERROR: $lib TIDAK DITEMUKAN DI CONFIG GPL!"
               exit 1
             fi
           done
 
+          make -j$(nproc)
           mkdir -p "$ROOT/dist/gpl"
           cp ffmpeg "$ROOT/dist/gpl/ffmpeg-gpl"
 
-          # Build Nonfree Version
+          # --- Build Nonfree Version ---
           cd "$ROOT"
           cp -r ffmpeg-9.0.1 ffmpeg-nonfree && cd ffmpeg-nonfree
           ./configure "${FLAGS[@]}" --enable-gpl --enable-nonfree --enable-libfdk-aac
-          make -j$(nproc)
 
-          # Verifikasi otomatis via strings (Nonfree)
-          strings ffmpeg | grep -E "configuration:" > nonfree-config.txt
-          for lib in "libaom" "libwebp" "libzimg"; do
-            if ! grep -q -e "--enable-$lib" nonfree-config.txt; then
-              echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI NONFREE BUILD!"
+          # Verifikasi langsung dari file ffbuild/config.mak
+          for lib in "CONFIG_LIBAOM=yes" "CONFIG_LIBWEBP=yes" "CONFIG_LIBZIMG=yes"; do
+            if ! grep -q "$lib" ffbuild/config.mak; then
+              echo "CRITICAL ERROR: $lib TIDAK DITEMUKAN DI CONFIG NONFREE!"
               exit 1
             fi
           done
 
+          make -j$(nproc)
           mkdir -p "$ROOT/dist/nonfree"
           cp ffmpeg "$ROOT/dist/nonfree/ffmpeg-nonfree"
 
