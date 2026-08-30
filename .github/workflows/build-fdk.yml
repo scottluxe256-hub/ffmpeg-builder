@@ -16,16 +16,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Android NDK
-        uses: nsetup/setup-sdk@v1
+        uses: nsdm/setup-android-ndk@v1
         with:
-          ndk-version: '25.2.9519653'
+          ndk-version: 'r25c'
 
       - name: Cache Build Dependencies
         uses: actions/cache@v3
         with:
           path: |
             build_deps
-          key: fdk-deps-arm64-v2-${{ hashFiles('**/build-fdk.yml') }}
+          key: fdk-deps-arm64-v3-${{ hashFiles('**/build-fdk.yml') }}
 
       - name: Build fdk-aac & FFmpeg Libraries (Static)
         run: |
@@ -61,13 +61,12 @@ jobs:
             cd ..
           fi
 
-          # 2. Build Minimal FFmpeg Libraries (Avformat, Avcodec, Swresample)
+          # 2. Build Minimal FFmpeg Libraries
           if [ ! -f "$PREFIX/lib/libavcodec.a" ]; then
             echo "Building minimal FFmpeg libraries..."
             git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_src
             cd ffmpeg_src
             
-            # Konfigurasi Muxer MP4, M4A, ADTS & Protocol File
             ./configure \
               --target-os=android \
               --arch=aarch64 \
