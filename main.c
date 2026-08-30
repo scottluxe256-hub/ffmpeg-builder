@@ -13,8 +13,10 @@
 int main(int argc, char *argv[]) {
     char *input_file = NULL;
     char *output_file = NULL;
-    int bitrate = 64000;       // Default 64k
+    int bitrate = 64000;       // Default 64k untuk CBR
+    int sample_rate = 44100;   // Default 44.1 kHz
     int aot = 29;              // Default HE-AAC v2 (AOT 29)
+    int vbr_mode = 0;          // Default 0 = CBR. Jika 1-5 = VBR Mode
 
     // Parse Argumen CLI
     for (int i = 1; i < argc; i++) {
@@ -23,6 +25,12 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "-b:a") == 0 && i + 1 < argc) {
             bitrate = atoi(argv[++i]) * 1000;
         } 
+        else if (strcmp(argv[i], "-ar") == 0 && i + 1 < argc) {
+            sample_rate = atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "-vbr") == 0 && i + 1 < argc) {
+            vbr_mode = atoi(argv[++i]); // Ambil level VBR (1-5)
+        }
         else if (strcmp(argv[i], "-profile:a") == 0 && i + 1 < argc) {
             char *profile = argv[++i];
             if (strcmp(profile, "aac_low") == 0) aot = 2;         // AAC-LC
@@ -33,14 +41,14 @@ int main(int argc, char *argv[]) {
 
     if (!input_file || !output_file) {
         printf("=========================================================\n");
-        printf(" Standalone Direct FDK-AAC Engine v1.0 (CLI)\n");
+        printf(" Standalone Direct FDK-AAC Engine v2.0 (CBR & VBR Support)\n");
         printf("=========================================================\n");
-        printf("Penggunaan: fdk-aac -i <input.mp4/mkv/wav> -profile:a <profile> -b:a <bitrate> -o <output.aac>\n\n");
-        printf("Contoh: fdk-aac -i input.mp4 -profile:a aac_he_v2 -b:a 64k -o output.aac\n");
+        printf("Mode CBR (Default) : fdk-aac -i input.mp4 -b:a 64k -o out.aac\n");
+        printf("Mode VBR (1 s/d 5)  : fdk-aac -i input.mp4 -vbr 3 -o out.aac\n\n");
         return 1;
     }
 
-    // 1. DEMUXING (Buka Container Input MP4/MKV)
+    // 1. DEMUXING (Buka Container Input)
     AVFormatContext *fmt_ctx = NULL;
     if (avformat_open_input(&fmt_ctx, input_file, NULL, NULL) < 0) {
         printf("Error: Gagal membongkar file container input '%s'!\n", input_file);
@@ -48,12 +56,11 @@ int main(int argc, char *argv[]) {
     }
 
     if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
-        printf("Error: Gagal membaca stream info dari input!\n");
+        printf("Error: Gagal membaca stream info!\n");
         avformat_close_input(&fmt_ctx);
         return 1;
     }
 
-    // Cari Stream Audio
     int audio_stream_idx = -1;
     for (unsigned int i = 0; i < fmt_ctx->nb_streams; i++) {
         if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -63,47 +70,57 @@ int main(int argc, char *argv[]) {
     }
 
     if (audio_stream_idx == -1) {
-        printf("Error: Tidak ditemukan stream audio di dalam file input!\n");
+        printf("Error: Tidak ditemukan stream audio di file input!\n");
         avformat_close_input(&fmt_ctx);
         return 1;
     }
 
-    // 2. SETUP INTERNAL DECODER
+    // 2. SETUP DECODER
     AVCodecParameters *codecpar = fmt_ctx->streams[audio_stream_idx]->codecpar;
     const AVCodec *decoder = avcodec_find_decoder(codecpar->codec_id);
     AVCodecContext *dec_ctx = avcodec_alloc_context3(decoder);
     avcodec_parameters_to_context(dec_ctx, codecpar);
 
     if (avcodec_open2(dec_ctx, decoder, NULL) < 0) {
-        printf("Error: Gagal menginisialisasi decoder audio internal!\n");
+        printf("Error: Gagal inisialisasi decoder!\n");
         avcodec_free_context(&dec_ctx);
         avformat_close_input(&fmt_ctx);
         return 1;
     }
 
-    int out_sample_rate = dec_ctx->sample_rate > 0 ? dec_ctx->sample_rate : 48000;
     int out_channels = 2; // Stereo
 
     // 3. SETUP ENCODER LIBFDK-AAC
     HANDLE_AACENCODER hAac;
     if (aacEncOpen(&hAac, 0, out_channels) != AACENC_OK) {
-        printf("Error: Gagal inisialisasi FDK-AAC Encoder Engine!\n");
+        printf("Error: Gagal inisialisasi FDK-AAC Encoder!\n");
         avcodec_free_context(&dec_ctx);
         avformat_close_input(&fmt_ctx);
         return 1;
     }
 
     aacEncoder_SetParam(hAac, AACENC_AOT, aot);
-    aacEncoder_SetParam(hAac, AACENC_SAMPLERATE, out_sample_rate);
-    aacEncoder_SetParam(hAac, AACENC_CHANNELMODE, MODE_2); // Stereo
-    aacEncoder_SetParam(hAac, AACENC_BITRATE, bitrate);
-    aacEncoder_SetParam(hAac, AACENC_TRANSMUX, 2);        // ADTS Header Stream
+    aacEncoder_SetParam(hAac, AACENC_SAMPLERATE, sample_rate);
+    aacEncoder_SetParam(hAac, AACENC_CHANNELMODE, MODE_2);
+    aacEncoder_SetParam(hAac, AACENC_TRANSMUX, 2); // ADTS Stream
 
-    // 4. SETUP RESAMPLER (Konversi Audio Internal ke S16 Stereo PCM)
+    // LOGIKA PENENTUAN MODE: CBR VS VBR
+    if (vbr_mode >= 1 && vbr_mode <= 5) {
+        // Jika flag -vbr diisi (1-5), gunakan VBR Mode!
+        aacEncoder_SetParam(hAac, AACENC_BITRATE_MODE, vbr_mode);
+        printf("[Engine] Running Mode: VBR (Quality Level: %d)\n", vbr_mode);
+    } else {
+        // Jika tidak, panggil fungsi CBR Murni!
+        aacEncoder_SetParam(hAac, AACENC_BITRATE_MODE, 0);
+        aacEncoder_SetParam(hAac, AACENC_BITRATE, bitrate);
+        printf("[Engine] Running Mode: CBR (Bitrate: %d bps)\n", bitrate);
+    }
+
+    // 4. SETUP RESAMPLER
     SwrContext *swr_ctx = swr_alloc();
     AVChannelLayout out_ch_layout = AV_CHANNEL_LAYOUT_STEREO;
     swr_alloc_set_opts2(&swr_ctx, 
-                        &out_ch_layout, AV_SAMPLE_FMT_S16, out_sample_rate,
+                        &out_ch_layout, AV_SAMPLE_FMT_S16, sample_rate,
                         &dec_ctx->ch_layout, dec_ctx->sample_fmt, dec_ctx->sample_rate,
                         0, NULL);
     swr_init(swr_ctx);
@@ -114,14 +131,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("[Engine] Processing Direct Input: %s -> %s [Profile: %d, Bitrate: %d bps]\n", 
-            input_file, output_file, aot, bitrate);
-
     // 5. PROCESSING LOOP
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
     
-    int16_t pcm_buffer[2048 * 2]; // 2048 samples stereo 16-bit
+    int16_t pcm_buffer[2048 * 2];
     uint8_t aac_buffer[2048];
 
     void *in_buffers[] = { pcm_buffer };
@@ -165,7 +179,7 @@ int main(int argc, char *argv[]) {
         av_packet_unref(pkt);
     }
 
-    printf("[Engine] Selesai! Audio AAC tersimpan di: %s\n", output_file);
+    printf("[Engine] Selesai! Result saved at: %s\n", output_file);
 
     // Cleanup Resources
     fclose(out_file);
