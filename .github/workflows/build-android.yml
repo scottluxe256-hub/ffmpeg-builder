@@ -13,26 +13,26 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Tools & Rust Setup
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build autoconf automake libtool \
-            pkg-config git curl wget unzip python3 yasm nasm texinfo gawk
-          
-          # Setup Rust Toolchain & Android Target untuk rav1e
-          rustup target add aarch64-linux-android
-          cargo install cargo-ndk
-
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
 
+      - name: Install Build Tools & Rust Setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build autoconf automake libtool \
+            pkg-config git curl wget unzip python3 yasm nasm texinfo gawk
+          
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk
+
+      # Gunakan curl dengan --retry agar anti-gagal/exit code 8
       - name: Setup Android NDK r26b
         working-directory: /home/runner
         run: |
-          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.tar.gz
+          curl -L --retry 5 --retry-delay 3 -O https://dl.google.com/android/repository/android-ndk-r26b-linux.tar.gz
           tar -xf android-ndk-r26b-linux.tar.gz
           rm android-ndk-r26b-linux.tar.gz
           echo "NDK_PATH=/home/runner/android-ndk-r26b" >> $GITHUB_ENV
@@ -45,7 +45,7 @@ jobs:
           echo "PREFIX_NONFREE=$GITHUB_WORKSPACE/dist/nonfree" >> $GITHUB_ENV
 
       # -------------------------------------------------------------
-      # COMPILE ALL EXTERNAL LIBRARIES (STATIC .a & .pc)
+      # COMPILE ALL EXTERNAL LIBRARIES
       # -------------------------------------------------------------
       - name: Build All External Libraries
         run: |
@@ -68,7 +68,7 @@ jobs:
 
           cd $BUILD_DIR
 
-          # 1. zlib (Dependency libpng)
+          # 1. zlib (Dependency libpng & libflac)
           git clone --depth 1 https://github.com/madler/zlib.git
           cd zlib
           ./configure --prefix=$BUILD_DIR/out_zlib --static
@@ -76,7 +76,25 @@ jobs:
           install_libs $BUILD_DIR/out_zlib
           cd $BUILD_DIR
 
-          # 2. libpng
+          # 2. libogg (Dependency vorbis & flac)
+          git clone --depth 1 https://github.com/xiph/ogg.git
+          cd ogg
+          ./autogen.sh
+          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_ogg
+          make -j$(nproc) && make install
+          install_libs $BUILD_DIR/out_ogg
+          cd $BUILD_DIR
+
+          # 3. libflac (Lossless Audio)
+          git clone --depth 1 https://github.com/xiph/flac.git
+          cd flac
+          ./autogen.sh
+          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_flac --with-ogg=$BUILD_DIR/out_ogg
+          make -j$(nproc) && make install
+          install_libs $BUILD_DIR/out_flac
+          cd $BUILD_DIR
+
+          # 4. libpng
           git clone --depth 1 https://github.com/pnggroup/libpng.git
           cd libpng
           ./autogen.sh
@@ -85,7 +103,7 @@ jobs:
           install_libs $BUILD_DIR/out_png
           cd $BUILD_DIR
 
-          # 3. libzimg
+          # 5. libzimg
           git clone --depth 1 https://github.com/sekrit-twc/zimg.git
           cd zimg
           ./autogen.sh
@@ -94,7 +112,7 @@ jobs:
           install_libs $BUILD_DIR/out_zimg
           cd $BUILD_DIR
 
-          # 4. x264
+          # 6. x264
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
           ./configure --host=aarch64-linux --enable-static --disable-cli --cross-prefix=$TOOLCHAIN/bin/aarch64-linux-android- --prefix=$BUILD_DIR/out_x264
@@ -102,7 +120,7 @@ jobs:
           install_libs $BUILD_DIR/out_x264
           cd $BUILD_DIR
 
-          # 5. x265
+          # 7. x265
           git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git
           cd x265_git/build/linux
           cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=29 -ENABLE_SHARED=OFF -DCMAKE_INSTALL_PREFIX=$BUILD_DIR/out_x265 ../../source
@@ -110,7 +128,7 @@ jobs:
           install_libs $BUILD_DIR/out_x265
           cd $BUILD_DIR
 
-          # 6. SVT-AV1
+          # 8. SVT-AV1
           git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
           cd SVT-AV1/Build
           cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=29 -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=$BUILD_DIR/out_svtav1 ..
@@ -118,7 +136,7 @@ jobs:
           install_libs $BUILD_DIR/out_svtav1
           cd $BUILD_DIR
 
-          # 7. libaom
+          # 9. libaom
           git clone --depth 1 https://aomedia.googlesource.com/aom
           mkdir -p aom/build_dir && cd aom/build_dir
           cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=29 -DBUILD_SHARED_LIBS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TESTS=OFF -DCMAKE_INSTALL_PREFIX=$BUILD_DIR/out_aom ..
@@ -126,7 +144,7 @@ jobs:
           install_libs $BUILD_DIR/out_aom
           cd $BUILD_DIR
 
-          # 8. librav1e (Rust C-API)
+          # 10. librav1e
           git clone --depth 1 https://github.com/xiph/rav1e.git
           cd rav1e
           cargo ndk -t arm64-v8a -p 29 -- build --release --c-header
@@ -136,7 +154,7 @@ jobs:
           install_libs $BUILD_DIR/out_rav1e
           cd $BUILD_DIR
 
-          # 9. libvpx
+          # 11. libvpx
           git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git
           cd libvpx
           ./configure --target=arm64-android-gcc --enable-static --disable-shared --disable-examples --disable-unit-tests --prefix=$BUILD_DIR/out_vpx
@@ -144,7 +162,7 @@ jobs:
           install_libs $BUILD_DIR/out_vpx
           cd $BUILD_DIR
 
-          # 10. LAME MP3
+          # 12. LAME MP3
           git clone --depth 1 https://github.com/gypified/libmp3lame.git
           cd libmp3lame
           ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_lame
@@ -152,7 +170,7 @@ jobs:
           install_libs $BUILD_DIR/out_lame
           cd $BUILD_DIR
 
-          # 11. libopus
+          # 13. libopus
           git clone --depth 1 https://github.com/xiph/opus.git
           cd opus
           ./autogen.sh
@@ -161,15 +179,7 @@ jobs:
           install_libs $BUILD_DIR/out_opus
           cd $BUILD_DIR
 
-          # 12. libogg & libvorbis
-          git clone --depth 1 https://github.com/xiph/ogg.git
-          cd ogg
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_ogg
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_ogg
-          cd $BUILD_DIR
-
+          # 14. libvorbis
           git clone --depth 1 https://github.com/xiph/vorbis.git
           cd vorbis
           ./autogen.sh
@@ -178,7 +188,7 @@ jobs:
           install_libs $BUILD_DIR/out_vorbis
           cd $BUILD_DIR
 
-          # 13. libwebp
+          # 15. libwebp
           git clone --depth 1 https://chromium.googlesource.com/webm/libwebp
           cd libwebp
           ./autogen.sh
@@ -187,7 +197,7 @@ jobs:
           install_libs $BUILD_DIR/out_webp
           cd $BUILD_DIR
 
-          # 14. libfdk-aac (Khusus Non-Free)
+          # 16. libfdk-aac (Khusus Non-Free)
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac
           cd fdk-aac
           ./autogen.sh
@@ -196,7 +206,7 @@ jobs:
           cd $BUILD_DIR
 
       # -------------------------------------------------------------
-      # BUILD 1: FFmpeg GPL Free (Full Options)
+      # BUILD 1: FFmpeg GPL Free
       # -------------------------------------------------------------
       - name: Compile FFmpeg Master - GPL Free
         run: |
@@ -222,7 +232,7 @@ jobs:
             --pkg-config=pkg-config \
             --pkg-config-flags="--static" \
             --extra-cflags="-I$PREFIX_GPL/include -O3 -ftree-vectorize -flto -march=armv8-a+simd" \
-            --extra-ldflags="-L$PREFIX_GPL/lib -flto -Wl,--gc-sections -lpng -lz" \
+            --extra-ldflags="-L$PREFIX_GPL/lib -flto -Wl,--gc-sections -lpng -lz -lflac" \
             --enable-neon \
             --enable-asm \
             --enable-inline-asm \
@@ -242,6 +252,7 @@ jobs:
             --enable-libmp3lame \
             --enable-libopus \
             --enable-libvorbis \
+            --enable-libflac \
             --enable-libwebp \
             --enable-libzimg \
             --disable-doc \
@@ -278,7 +289,7 @@ jobs:
             --pkg-config=pkg-config \
             --pkg-config-flags="--static" \
             --extra-cflags="-I$PREFIX_NONFREE/include -O3 -ftree-vectorize -flto -march=armv8-a+simd" \
-            --extra-ldflags="-L$PREFIX_NONFREE/lib -flto -Wl,--gc-sections -lpng -lz" \
+            --extra-ldflags="-L$PREFIX_NONFREE/lib -flto -Wl,--gc-sections -lpng -lz -lflac" \
             --enable-neon \
             --enable-asm \
             --enable-inline-asm \
@@ -299,6 +310,7 @@ jobs:
             --enable-libmp3lame \
             --enable-libopus \
             --enable-libvorbis \
+            --enable-libflac \
             --enable-libwebp \
             --enable-libzimg \
             --disable-doc \
