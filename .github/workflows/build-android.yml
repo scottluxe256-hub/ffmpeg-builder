@@ -54,12 +54,25 @@ jobs:
           echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig" >> $GITHUB_ENV
           echo "JOBS=$(nproc)" >> $GITHUB_ENV
 
-          echo "TARGET_CC=$TOOLCHAIN/bin/aarch64-linux-android${API}-clang" >> $GITHUB_ENV
-          echo "TARGET_CXX=$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++" >> $GITHUB_ENV
+          TARGET_CC="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang"
+          TARGET_CXX="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++"
+
+          echo "TARGET_CC=$TARGET_CC" >> $GITHUB_ENV
+          echo "TARGET_CXX=$TARGET_CXX" >> $GITHUB_ENV
           echo "AR=$TOOLCHAIN/bin/llvm-ar" >> $GITHUB_ENV
           echo "RANLIB=$TOOLCHAIN/bin/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/bin/llvm-strip" >> $GITHUB_ENV
 
+          # Generate global android_toolchain.cmake di awal
+          cat << EOF > $WORKSPACE/android_toolchain.cmake
+          set(CMAKE_SYSTEM_NAME Android)
+          set(CMAKE_SYSTEM_VERSION ${API})
+          set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)
+          set(CMAKE_ANDROID_NDK ${NDK_PATH})
+          set(CMAKE_C_COMPILER ${TARGET_CC})
+          set(CMAKE_CXX_COMPILER ${TARGET_CXX})
+          EOF
+          
       # Cache Static Libraries
       - name: Cache Compiled Dependencies
         id: cache-deps
