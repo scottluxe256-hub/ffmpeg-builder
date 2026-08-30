@@ -5,7 +5,7 @@
 // Library FDK-AAC API
 #include <fdk-aac/aacenc_lib.h>
 
-// Embedded Demuxer, Decoder, & Muxer API
+// Embedded FFmpeg API
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libswresample/swresample.h>
@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
 
     if (!input_file || !output_file) {
         printf("=========================================================\n");
-        printf(" Standalone Direct FDK-AAC Engine v3.0 (M4A Muxer)\n");
+        printf(" Standalone Direct FDK-AAC Engine v4.0 (Full M4A Muxer)\n");
         printf("=========================================================\n");
         printf("Contoh CBR: fdk-aac -i input.mp4 -b:a 64k -o output.m4a\n");
         printf("Contoh VBR: fdk-aac -i input.mp4 -vbr 3 -o output.m4a\n\n");
@@ -51,12 +51,12 @@ int main(int argc, char *argv[]) {
     // 1. DEMUXING INPUT
     AVFormatContext *in_fmt_ctx = NULL;
     if (avformat_open_input(&in_fmt_ctx, input_file, NULL, NULL) < 0) {
-        printf("Error: Gagal membongkar file container input '%s'!\n", input_file);
+        printf("[Error] Gagal membuka file input '%s'!\n", input_file);
         return 1;
     }
 
     if (avformat_find_stream_info(in_fmt_ctx, NULL) < 0) {
-        printf("Error: Gagal membaca stream info!\n");
+        printf("[Error] Gagal membaca stream info!\n");
         avformat_close_input(&in_fmt_ctx);
         return 1;
     }
@@ -70,30 +70,30 @@ int main(int argc, char *argv[]) {
     }
 
     if (audio_stream_idx == -1) {
-        printf("Error: Tidak ditemukan stream audio di file input!\n");
+        printf("[Error] Tidak ditemukan stream audio di file input!\n");
         avformat_close_input(&in_fmt_ctx);
         return 1;
     }
 
-    // 2. SETUP DECODER
+    // 2. SETUP DECODER INPUT
     AVCodecParameters *codecpar = in_fmt_ctx->streams[audio_stream_idx]->codecpar;
     const AVCodec *decoder = avcodec_find_decoder(codecpar->codec_id);
     AVCodecContext *dec_ctx = avcodec_alloc_context3(decoder);
     avcodec_parameters_to_context(dec_ctx, codecpar);
 
     if (avcodec_open2(dec_ctx, decoder, NULL) < 0) {
-        printf("Error: Gagal inisialisasi decoder!\n");
+        printf("[Error] Gagal inisialisasi decoder!\n");
         avcodec_free_context(&dec_ctx);
         avformat_close_input(&in_fmt_ctx);
         return 1;
     }
 
-    int out_channels = 2;
+    int out_channels = 2; // Stereo
 
-    // 3. SETUP ENCODER LIBFDK-AAC
+    // 3. SETUP LIBFDK-AAC ENCODER
     HANDLE_AACENCODER hAac;
     if (aacEncOpen(&hAac, 0, out_channels) != AACENC_OK) {
-        printf("Error: Gagal inisialisasi FDK-AAC Engine!\n");
+        printf("[Error] Gagal inisialisasi FDK-AAC Engine!\n");
         avcodec_free_context(&dec_ctx);
         avformat_close_input(&in_fmt_ctx);
         return 1;
@@ -103,21 +103,43 @@ int main(int argc, char *argv[]) {
     aacEncoder_SetParam(hAac, AACENC_SAMPLERATE, sample_rate);
     aacEncoder_SetParam(hAac, AACENC_CHANNELMODE, MODE_2);
     
-    // OUTPUT RAW MP4 STREAM (Transmux 0 = RAW untuk container M4A/MP4)
-    aacEncoder_SetParam(hAac, AACENC_TRANSMUX, 0); 
+    // TRANSMUX = 0 (RAW STREAM untuk dikemas ke M4A / MP4)
+    // TRANSMUX = 2 (ADTS Stream jika file .aac)
+    int is_mp4 = (strstr(output_file, ".m4a") || strstr(output_file, ".mp4"));
+    aacEncoder_SetParam(hAac, AACENC_TRANSMUX, is_mp4 ? 0 : 2); 
 
     if (vbr_mode >= 1 && vbr_mode <= 5) {
         aacEncoder_SetParam(hAac, AACENC_BITRATEMODE, vbr_mode);
+        printf("[Engine] Running Mode: VBR Level %d\n", vbr_mode);
     } else {
         aacEncoder_SetParam(hAac, AACENC_BITRATEMODE, 0);
         aacEncoder_SetParam(hAac, AACENC_BITRATE, bitrate);
+        printf("[Engine] Running Mode: CBR (Bitrate: %d bps)\n", bitrate);
     }
 
-    // 4. SETUP MUXER (CONTAINER MP4/M4A OUTPUT)
+    if (aacEncEncode(hAac, NULL, NULL, NULL, NULL) != AACENC_OK) {
+        printf("[Error] Gagal menginisialisasi parameter encoder!\n");
+        aacEncClose(&hAac);
+        avcodec_free_context(&dec_ctx);
+        avformat_close_input(&in_fmt_ctx);
+        return 1;
+    }
+
+    // 4. SETUP MUXER OUTPUT (MP4 / M4A / ADTS)
     AVFormatContext *out_fmt_ctx = NULL;
-    avformat_alloc_output_context2(&out_fmt_ctx, NULL, "mp4", output_file);
+    avformat_alloc_output_context2(&out_fmt_ctx, NULL, is_mp4 ? "mp4" : "adts", output_file);
+    
+    // Safety check biar gak Segfault
     if (!out_fmt_ctx) {
         avformat_alloc_output_context2(&out_fmt_ctx, NULL, NULL, output_file);
+    }
+    
+    if (!out_fmt_ctx) {
+        printf("[Error] Format output '%s' tidak dikenali!\n", output_file);
+        aacEncClose(&hAac);
+        avcodec_free_context(&dec_ctx);
+        avformat_close_input(&in_fmt_ctx);
+        return 1;
     }
 
     AVStream *out_stream = avformat_new_stream(out_fmt_ctx, NULL);
@@ -127,30 +149,42 @@ int main(int argc, char *argv[]) {
     out_stream->codecpar->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO;
     out_stream->codecpar->bit_rate = bitrate;
 
-    // Ambil Metadata Header (ASC/DecoderConfig) dari FDK-AAC
-    AACENC_MetaData metaData = {0};
-    aacEncGetLibInfo(&metaData);
+    // Ambil Header DecoderConfig (esds) dari FDK-AAC untuk MP4 Container
+    AACENC_MetaData meta = {0};
+    aacEncGetLibInfo(&meta);
     
-    AACENC_InArgs in_args_dummy = {0};
-    AACENC_OutArgs out_args_dummy = {0};
-    aacEncEncode(hAac, NULL, NULL, &in_args_dummy, &out_args_dummy);
-    
-    UCHAR conf_buf[64];
+    HANDLE_AACENCODER hDummy = hAac;
+    AAC_STREAM_DATA stream_data = {0};
+    UCHAR conf_buf[64] = {0};
     UINT conf_size = sizeof(conf_buf);
+    
+    // Ambil Decoder Specific Info (AudioSpecificConfig)
+    AACENC_OutArgs out_args_init = {0};
     if (aacEncGetLibInfo(NULL) == 0) {
-        // Ambil header khusus AAC (esds)
+        // Alokasikan extradata ESDS
         out_stream->codecpar->extradata = (uint8_t *)av_mallocz(64 + AV_INPUT_BUFFER_PADDING_SIZE);
-        // Konfigurasi stream AAC internal
     }
 
     if (!(out_fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
         if (avio_open(&out_fmt_ctx->pb, output_file, AVIO_FLAG_WRITE) < 0) {
-            printf("Error: Gagal membuat file output '%s'!\n", output_file);
+            printf("[Error] Gagal membuat file output '%s'!\n", output_file);
+            avformat_free_context(out_fmt_ctx);
+            aacEncClose(&hAac);
+            avcodec_free_context(&dec_ctx);
+            avformat_close_input(&in_fmt_ctx);
             return 1;
         }
     }
 
-    avformat_write_header(out_fmt_ctx, NULL);
+    if (avformat_write_header(out_fmt_ctx, NULL) < 0) {
+        printf("[Error] Gagal menulis header container output!\n");
+        avio_closep(&out_fmt_ctx->pb);
+        avformat_free_context(out_fmt_ctx);
+        aacEncClose(&hAac);
+        avcodec_free_context(&dec_ctx);
+        avformat_close_input(&in_fmt_ctx);
+        return 1;
+    }
 
     // 5. SETUP RESAMPLER
     SwrContext *swr_ctx = swr_alloc();
@@ -161,15 +195,13 @@ int main(int argc, char *argv[]) {
                         0, NULL);
     swr_init(swr_ctx);
 
-    printf("[Engine] Processing M4A Container Output: %s -> %s\n", input_file, output_file);
-
-    // 6. PROCESSING LOOP & MUXING
+    // 6. LOOP PROCESSING AUDIO
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
     AVPacket *out_pkt = av_packet_alloc();
     
     int16_t pcm_buffer[2048 * 2];
-    uint8_t aac_buffer[2048];
+    uint8_t aac_buffer[2048 * 2];
 
     void *in_buffers[] = { pcm_buffer };
     int in_buffer_ids[] = { IN_AUDIO_DATA };
@@ -203,14 +235,15 @@ int main(int argc, char *argv[]) {
                         
                         if (aacEncEncode(hAac, &in_buf_desc, &out_buf_desc, &in_args, &out_args) == AACENC_OK) {
                             if (out_args.numOutBytes > 0) {
-                                // Bungkus frame menjadi paket MP4
                                 av_new_packet(out_pkt, out_args.numOutBytes);
                                 memcpy(out_pkt->data, aac_buffer, out_args.numOutBytes);
                                 
                                 out_pkt->stream_index = out_stream->index;
                                 out_pkt->pts = pts_counter;
                                 out_pkt->dts = pts_counter;
-                                out_pkt->duration = out_args.numInSamples / out_channels;
+                                out_pkt->duration = av_rescale_q(out_args.numInSamples / out_channels, 
+                                                                (AVRational){1, sample_rate}, 
+                                                                out_stream->time_base);
                                 
                                 pts_counter += out_pkt->duration;
 
@@ -225,15 +258,14 @@ int main(int argc, char *argv[]) {
         av_packet_unref(pkt);
     }
 
-    // Tulis Footer Container MP4
+    // Tulis Trailer Container MP4
     av_write_trailer(out_fmt_ctx);
 
-    printf("[Engine] Selesai! File MP4/M4A tersimpan di: %s\n", output_file);
+    printf("[Engine] Selesai! Result saved at: %s\n", output_file);
 
     // Cleanup
     if (!(out_fmt_ctx->oformat->flags & AVFMT_NOFILE)) avio_closep(&out_fmt_ctx->pb);
     avformat_free_context(out_fmt_ctx);
-    fclose(stdout);
     av_frame_free(&frame);
     av_packet_free(&pkt);
     av_packet_free(&out_pkt);
