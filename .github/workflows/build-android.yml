@@ -28,15 +28,13 @@ jobs:
           rustup target add aarch64-linux-android
           cargo install cargo-ndk
 
-      # Menggunakan NDK bawaan runner Ubuntu GitHub (Gak perlu download/action luar!)
-      - name: Locate Pre-installed Android NDK
+      - name: Locate Pre-installed Android NDK & Setup Toolchain
         run: |
-          # Cari folder NDK yang sudah terinstall otomatis di runner
           NDK_FOUND=$(ls -d $ANDROID_SDK_ROOT/ndk/* | tail -n 1)
           echo "NDK_PATH=$NDK_FOUND" >> $GITHUB_ENV
           echo "Target NDK Path: $NDK_FOUND"
 
-      - name: Setup Toolchain & Directories
+      - name: Setup Toolchain & Environment Variables
         run: |
           echo "TARGET_API=29" >> $GITHUB_ENV
           echo "BUILD_DIR=$GITHUB_WORKSPACE/build_space" >> $GITHUB_ENV
@@ -44,19 +42,35 @@ jobs:
           echo "PREFIX_NONFREE=$GITHUB_WORKSPACE/dist/nonfree" >> $GITHUB_ENV
 
       # -------------------------------------------------------------
-      # COMPILE ALL EXTERNAL LIBRARIES
+      # COMPILE ALL EXTERNAL LIBRARIES (ALL-IN-ONE ROBUST FIX)
       # -------------------------------------------------------------
       - name: Build All External Libraries
         run: |
           mkdir -p $BUILD_DIR $PREFIX_GPL $PREFIX_NONFREE
+          mkdir -p $PREFIX_GPL/lib/pkgconfig $PREFIX_NONFREE/lib/pkgconfig
+
           export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
           export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
           export AR=$TOOLCHAIN/bin/llvm-ar
           export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
           export STRIP=$TOOLCHAIN/bin/llvm-strip
-          export CFLAGS="-O3 -ftree-vectorize -flto -march=armv8-a+simd+crypto -fPIC"
+          export AS=$TOOLCHAIN/bin/llvm-as
+          export NM=$TOOLCHAIN/bin/llvm-nm
+
+          # Pastikan compiler benar-benar ada!
+          if [ ! -f "$CC" ]; then
+            echo "Compiler tidak ditemukan di $CC, mencari fallback..."
+            export CC=$(find $TOOLCHAIN/bin -name "aarch64-linux-android*29-clang" | head -n 1)
+            export CXX=$(find $TOOLCHAIN/bin -name "aarch64-linux-android*29-clang++" | head -n 1)
+          fi
+
+          echo "Menggunakan CC: $CC"
+
+          export CFLAGS="-O3 -ftree-vectorize -flto -march=armv8-a+simd+crypto -fPIC -D__ANDROID_API__=29"
+          export CXXFLAGS="$CFLAGS"
           export LDFLAGS="-flto -Wl,--gc-sections"
+          export PKG_CONFIG_PATH="$PREFIX_GPL/lib/pkgconfig:$PREFIX_NONFREE/lib/pkgconfig:$PKG_CONFIG_PATH"
 
           install_libs() {
             cp -r $1/include/* $PREFIX_GPL/include/ 2>/dev/null || true
@@ -70,7 +84,7 @@ jobs:
           # 1. zlib
           git clone --depth 1 https://github.com/madler/zlib.git
           cd zlib
-          ./configure --prefix=$BUILD_DIR/out_zlib --static
+          CHOST=aarch64-linux-android ./configure --prefix=$BUILD_DIR/out_zlib --static
           make -j$(nproc) && make install
           install_libs $BUILD_DIR/out_zlib
           cd $BUILD_DIR
@@ -114,7 +128,7 @@ jobs:
           # 6. x264
           git clone --depth 1 https://code.videolan.org/videolan/x264.git
           cd x264
-          ./configure --host=aarch64-linux --enable-static --disable-cli --cross-prefix=$TOOLCHAIN/bin/aarch64-linux-android- --prefix=$BUILD_DIR/out_x264
+          ./configure --host=aarch64-linux --enable-static --disable-cli --cross-prefix=$TOOLCHAIN/bin/llvm- --prefix=$BUILD_DIR/out_x264
           make -j$(nproc) && make install
           install_libs $BUILD_DIR/out_x264
           cd $BUILD_DIR
@@ -122,7 +136,7 @@ jobs:
           # 7. x265
           git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git
           cd x265_git/build/linux
-          cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=29 -ENABLE_SHARED=OFF -DCMAKE_INSTALL_PREFIX=$BUILD_DIR/out_x265 ../../source
+          cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=29 -DENABLE_SHARED=OFF -DCMAKE_INSTALL_PREFIX=$BUILD_DIR/out_x265 ../../source
           make -j$(nproc) && make install
           install_libs $BUILD_DIR/out_x265
           cd $BUILD_DIR
