@@ -75,7 +75,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v4-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v5-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -253,7 +253,7 @@ jobs:
             --enable-mediacodec \
             --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus --enable-libmp3lame --enable-libvorbis --enable-libsoxr \
             --enable-libsvtav1 --enable-libaom --enable-librav1e --enable-libdav1d \
-            --enable-libwebp --enable-zimg \
+            --enable-libwebp --enable-libzimg \
           || { echo "----- ffbuild/config.log -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$JOBS install
@@ -263,6 +263,10 @@ jobs:
         run: |
           echo "Menggabungkan static libraries jadi satu libffmpeg.so..."
           
+          # Deteksi nama file JPEG turbo (libturbojpeg.a / libjpeg.a)
+          JPEG_LIB="$INSTALL_DIR/lib/libjpeg.a"
+          [ -f "$INSTALL_DIR/lib/libturbojpeg.a" ] && JPEG_LIB="$INSTALL_DIR/lib/libturbojpeg.a"
+
           $TARGET_CC -shared -o $GITHUB_WORKSPACE/output_arm64/libffmpeg.so \
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
             -I$INSTALL_DIR/include \
@@ -288,7 +292,7 @@ jobs:
             $INSTALL_DIR/lib/libsoxr.a \
             $INSTALL_DIR/lib/libwebp.a \
             $INSTALL_DIR/lib/libpng.a \
-            $INSTALL_DIR/lib/libjpeg.a \
+            $JPEG_LIB \
             $INSTALL_DIR/lib/libzimg.a \
             -Wl,--no-whole-archive \
             -L$INSTALL_DIR/lib \
