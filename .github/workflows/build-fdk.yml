@@ -1,135 +1,134 @@
-name: Build FDK-AAC Standalone Engine
+name: Build fdk-aac CLI (static, Android arm64-v8a)
 
 on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/build-android.yml'
+
+env:
+  NDK_VERSION: r27c
+  API_LEVEL: 24
+  TARGET: aarch64-linux-android
 
 jobs:
-  build-android-arm64:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Android NDK (Native Runner)
-        run: |
-          # Cari lokasi NDK bawaan GitHub Runner
-          if [ -d "$ANDROID_SDK_ROOT/ndk-bundle" ]; then
-            NDK_PATH="$ANDROID_SDK_ROOT/ndk-bundle"
-          else
-            NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | tail -n 1)
-          fi
-          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
-          echo "Menggunakan NDK dari: $NDK_PATH"
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y autoconf automake libtool build-essential curl pkg-config nasm
 
-      - name: Cache Build Dependencies
-        uses: actions/cache@v3
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
         with:
-          path: |
-            build_deps
-          key: fdk-deps-arm64-v5-${{ hashFiles('**/build-fdk.yml') }}
+          ndk-version: ${{ env.NDK_VERSION }}
 
-      - name: Build fdk-aac & FFmpeg Libraries (Static)
+      - name: Export toolchain paths
         run: |
-          set -e
-          export NDK=$ANDROID_NDK_ROOT
-          export HOST_TAG=linux-x86_64
-          export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/$HOST_TAG
-          export TARGET=aarch64-linux-android
-          export API=24
-          export AR=$TOOLCHAIN/bin/llvm-ar
-          export CC=$TOOLCHAIN/bin/${TARGET}${API}-clang
-          export CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++
-          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-          export STRIP=$TOOLCHAIN/bin/llvm-strip
+          echo "TOOLCHAIN=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64" >> "$GITHUB_ENV"
+          echo "FDK_PREFIX=${{ github.workspace }}/install/fdk-aac" >> "$GITHUB_ENV"
+          echo "FFMPEG_PREFIX=${{ github.workspace }}/install/ffmpeg" >> "$GITHUB_ENV"
 
-          PREFIX="$(pwd)/build_deps"
-          mkdir -p "$PREFIX"
-
-          # 1. Build libfdk-aac jika belum ada di cache
-          if [ ! -f "$PREFIX/lib/libfdk-aac.a" ]; then
-            echo "Building libfdk-aac..."
-            git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
-            cd fdk-aac
-            ./autogen.sh
-            ./configure \
-              --host=$TARGET \
-              --prefix=$PREFIX \
-              --enable-static \
-              --disable-shared \
-              CC=$CC CXX=$CXX AR=$AR RANLIB=$RANLIB STRIP=$STRIP
-            make -j$(nproc)
-            make install
-            cd ..
-          fi
-
-          # 2. Build Minimal FFmpeg Libraries
-          if [ ! -f "$PREFIX/lib/libavcodec.a" ]; then
-            echo "Building minimal FFmpeg libraries..."
-            git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg_src
-            cd ffmpeg_src
-            
-            ./configure \
-              --target-os=android \
-              --arch=aarch64 \
-              --cpu=armv8-a \
-              --enable-cross-compile \
-              --cc=$CC \
-              --cxx=$CXX \
-              --ar=$AR \
-              --ranlib=$RANLIB \
-              --strip=$STRIP \
-              --prefix=$PREFIX \
-              --enable-static \
-              --disable-shared \
-              --enable-pic \
-              --disable-everything \
-              --disable-programs \
-              --disable-doc \
-              --enable-decoder=aac,mp3,flac,pcm_s16le,pcm_s24le,wav \
-              --enable-demuxer=aac,mp3,flac,wav,mov,matroska,avi \
-              --enable-muxer=mp4,m4a,ipod,adts \
-              --enable-protocol=file \
-              --enable-parser=aac,mpegaudio \
-              --enable-filter=aresample \
-              --enable-libfdk-aac \
-              --enable-nonfree \
-              --extra-cflags="-I$PREFIX/include" \
-              --extra-ldflags="-L$PREFIX/lib"
-            
-            make -j$(nproc)
-            make install
-            cd ..
-          fi
-
-      - name: Compile Standalone Executable (main.c)
+      # ---------------------------------------------------------------
+      # 1) libfdk-aac static (encoder AAC) — versi terbaru dari repo resmi
+      # ---------------------------------------------------------------
+      - name: Build libfdk-aac (static, arm64-v8a)
         run: |
-          export NDK=$ANDROID_NDK_ROOT
-          export HOST_TAG=linux-x86_64
-          export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/$HOST_TAG
-          export TARGET=aarch64-linux-android
-          export API=24
-          export CC=$TOOLCHAIN/bin/${TARGET}${API}-clang
-          PREFIX="$(pwd)/build_deps"
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
+          cd fdk-aac
+          autoreconf -fiv
+          CC="$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang" \
+          CXX="$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang++" \
+          AR="$TOOLCHAIN/bin/llvm-ar" \
+          RANLIB="$TOOLCHAIN/bin/llvm-ranlib" \
+          STRIP="$TOOLCHAIN/bin/llvm-strip" \
+          ./configure \
+            --host=aarch64-linux-android \
+            --enable-static --disable-shared \
+            --prefix="$FDK_PREFIX"
+          make -j"$(nproc)"
+          make install
 
-          mkdir -p output
+      # ---------------------------------------------------------------
+      # 2) libavformat + libavcodec + libavutil + libswresample static
+      #    (CUMA demux+decode, semua encoder/muxer/network/avdevice/avfilter
+      #    dimatikan — ini dipakai sebagai LIBRARY yang di-link langsung ke
+      #    binary fdk-aac, bukan dipanggil sebagai proses ffmpeg terpisah)
+      # ---------------------------------------------------------------
+      - name: Build FFmpeg libav* decode-only (static, arm64-v8a)
+        run: |
+          git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
+          cd ffmpeg-src
+          ./configure \
+            --target-os=android \
+            --arch=aarch64 \
+            --cpu=armv8-a \
+            --enable-cross-compile \
+            --cross-prefix="$TOOLCHAIN/bin/llvm-" \
+            --cc="$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang" \
+            --cxx="$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang++" \
+            --sysroot="$TOOLCHAIN/sysroot" \
+            --enable-static --disable-shared \
+            --disable-programs --disable-doc \
+            --disable-avdevice --disable-avfilter --disable-postproc \
+            --disable-network \
+            --disable-encoders --disable-muxers \
+            --disable-zlib --disable-lzma --disable-bzlib --disable-iconv \
+            --disable-debug \
+            --extra-cflags="-O2" \
+            --prefix="$FFMPEG_PREFIX"
+          # Catatan: kalau ./configure gagal deteksi cross-compile toolchain,
+          # coba tambahkan --disable-asm sebagai fallback (lebih lambat tapi
+          # lebih gampang link-nya). Demuxer/decoder tetap "enable semua"
+          # secara default (tidak dibatasi format tertentu) sesuai kebutuhan
+          # "semua format apapun".
+          make -j"$(nproc)"
+          make install
 
-          echo "Compiling fdk-aac binary with full M4A/MP4 muxing support..."
-          $CC main.c -o output/fdk-aac \
-            -I$PREFIX/include \
-            -L$PREFIX/lib \
-            -lavformat -lavcodec -lswresample -lavutil -lfdk-aac -lm -lz -ldl \
-            -static-libstdc++ \
-            -O3 -s
+      # ---------------------------------------------------------------
+      # 3) minimp4.h — muxer MP4 output .m4a (single header, MIT)
+      # ---------------------------------------------------------------
+      - name: Fetch minimp4.h
+        run: curl -fsSL -o src/minimp4.h https://raw.githubusercontent.com/lieff/minimp4/master/minimp4.h
 
-          chmod +x output/fdk-aac
+      # ---------------------------------------------------------------
+      # 4) compile fdk-aac CLI, link semua static jadi satu binary
+      # ---------------------------------------------------------------
+      - name: Build fdk-aac CLI (fully static executable)
+        run: |
+          "$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang" \
+            -O2 -static -o fdk-aac \
+            src/main.c \
+            -I"$FDK_PREFIX/include" \
+            -I"$FFMPEG_PREFIX/include" \
+            -Isrc \
+            -Wl,--start-group \
+            "$FFMPEG_PREFIX/lib/libavformat.a" \
+            "$FFMPEG_PREFIX/lib/libavcodec.a" \
+            "$FFMPEG_PREFIX/lib/libswresample.a" \
+            "$FFMPEG_PREFIX/lib/libavutil.a" \
+            "$FDK_PREFIX/lib/libfdk-aac.a" \
+            -Wl,--end-group \
+            -lm
+          # Kalau -static gagal link penuh di NDK versi kamu, cek dulu log
+          # build libfdk-aac/x264/x265/svtav1 di proyek ffmpeg-scott kamu
+          # yang sudah lebih dulu berhasil static build — biasanya isunya
+          # sama (versi NDK / API level / flag linker).
+          "$TOOLCHAIN/bin/llvm-strip" fdk-aac
 
-      - name: Upload Binary Artifact
+      - name: Siapkan versi .so (workaround Access Denied di Android)
+        run: cp fdk-aac libfdk-aac-cli.so
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: fdk-aac-android-arm64
-          path: output/fdk-aac
+          path: |
+            fdk-aac
+            libfdk-aac-cli.so
