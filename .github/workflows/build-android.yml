@@ -63,11 +63,9 @@ jobs:
           echo "RANLIB=$TOOLCHAIN/bin/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/bin/llvm-strip" >> $GITHUB_ENV
 
-          # NDK Official CMake Toolchain File
           NDK_CMAKE="$NDK_PATH/build/cmake/android.toolchain.cmake"
           echo "NDK_CMAKE=$NDK_CMAKE" >> $GITHUB_ENV
 
-      # Cache Key dinaikkan ke v9 untuk memaksa Rebuild Bersih dengan -fPIC
       - name: Cache Compiled Dependencies
         id: cache-deps
         uses: actions/cache@v4
@@ -75,7 +73,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v9-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v10-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -89,7 +87,7 @@ jobs:
           make -j$JOBS && $STRIP .libs/libfdk-aac.so
           cp .libs/libfdk-aac.so $GITHUB_WORKSPACE/output_arm64/libfdk_aac.so
 
-      # 2. AUDIO LIBRARIES (OPUS, MP3LAME, VORBIS, SOXR)
+      # 2. AUDIO LIBRARIES
       - name: Build Audio Libraries
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
@@ -100,7 +98,7 @@ jobs:
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
-          # MP3Lame (Perbaikan Utama: --with-pic & CFLAGS -fPIC)
+          # MP3Lame
           cd $WORKSPACE && wget -q https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
           tar -xf lame-3.100.tar.gz && cd lame-3.100
           ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic CFLAGS="-fPIC" CXXFLAGS="-fPIC"
@@ -115,7 +113,7 @@ jobs:
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
-          # Soxr (Resampler)
+          # Soxr
           cd $WORKSPACE && git clone --depth 1 https://git.code.sf.net/p/soxr/code soxr
           cmake -G "Ninja" -S soxr -B soxr/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
@@ -128,7 +126,7 @@ jobs:
             -DBUILD_TESTS=OFF
           ninja -C soxr/build install
 
-      # 3. VIDEO CODECS (X264, X265, VPX)
+      # 3. VIDEO CODECS
       - name: Build Video Codecs
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
@@ -159,7 +157,7 @@ jobs:
           ./configure --target=arm64-android-gcc --prefix=$INSTALL_DIR --enable-pic --disable-examples --disable-unit-tests --enable-vp8 --enable-vp9 --disable-shared --enable-static
           make -j$JOBS && make install
 
-      # 4. TRIO AV1 & DAV1D DECODER
+      # 4. AV1 CODECS & DAV1D
       - name: Build AV1 Codecs
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
@@ -183,7 +181,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_SHARED_LIBS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TESTS=OFF -DENABLE_DOCS=OFF
           ninja -C aom/build install
 
-          # rav1e (Rust)
+          # rav1e
           cd $WORKSPACE && git clone --depth 1 https://github.com/xiph/rav1e.git && cd rav1e
           cargo cinstall --release --target aarch64-linux-android --prefix=$INSTALL_DIR --library-type=staticlib
 
@@ -201,10 +199,10 @@ jobs:
           cpu = 'armv8-a'
           endian = 'little'
           EOF
-          meson setup dav1d/build dav1d --cross-file $WORKSPACE/cross_android.meson --prefix $INSTALL_DIR --default-library static -Denable_tools=false -Denable_tests=false -Db_pie=true
+          meson setup dav1d/build dav1d --cross-file $WORKSPACE/cross_android.meson --prefix $INSTALL_DIR --defaultlibrary static -Denable_tools=false -Denable_tests=false -Db_pie=true
           ninja -C dav1d/build install
 
-      # 5. IMAGE LIBRARIES ONLY (WEBP, PNG, JPEG, ZIMG)
+      # 5. IMAGE LIBRARIES
       - name: Build Image Libraries
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
@@ -244,7 +242,7 @@ jobs:
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
-      # 6. BUILD FFMPEG STATIC WITH ALL LIBRARIES
+      # 6. BUILD FFMPEG STATIC WITH -fPIC ENFORCED
       - name: Build FFmpeg Static Libraries
         run: |
           cd $WORKSPACE
@@ -256,8 +254,10 @@ jobs:
             --cc=$TARGET_CC --cxx=$TARGET_CXX --ar=$AR --ranlib=$RANLIB --strip=$STRIP \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-cxxflags="-fPIC" \
             --extra-ldflags="-L$INSTALL_DIR/lib -lm -lstdc++" \
             --prefix=$INSTALL_DIR \
+            --enable-pic \
             --enable-static --disable-shared \
             --enable-gpl --disable-nonfree \
             --enable-jni --enable-mediacodec \
@@ -268,19 +268,19 @@ jobs:
 
           make -j$JOBS install
 
-      # 7. BUNDLE EVERYTHING INTO SINGLE LIBFFMPEG.SO
-      - name: Bundle into Single libffmpeg.so
+      # 7. LINK EVERYTHING INTO MONOLITHIC LIBFFMPEG.SO
+      - name: Bundle into Single Monolithic libffmpeg.so
         run: |
-          echo "Menggabungkan static libraries jadi satu libffmpeg.so..."
-          
+          echo "Menggabungkan semua static archives jadi satu libffmpeg.so raksasa..."
+
           JPEG_LIB="$INSTALL_DIR/lib/libjpeg.a"
           [ -f "$INSTALL_DIR/lib/libturbojpeg.a" ] && JPEG_LIB="$INSTALL_DIR/lib/libturbojpeg.a"
 
-          $TARGET_CC -shared -o $GITHUB_WORKSPACE/output_arm64/libffmpeg.so \
+          $TARGET_CC -shared -fPIC -o $GITHUB_WORKSPACE/output_arm64/libffmpeg.so \
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
             -I$INSTALL_DIR/include \
             -Wl,--allow-multiple-definition \
-            -Wl,--whole-archive \
+            -Wl,--start-group \
             $INSTALL_DIR/lib/libavformat.a \
             $INSTALL_DIR/lib/libavcodec.a \
             $INSTALL_DIR/lib/libavutil.a \
@@ -304,11 +304,14 @@ jobs:
             $INSTALL_DIR/lib/libpng.a \
             $JPEG_LIB \
             $INSTALL_DIR/lib/libzimg.a \
-            -Wl,--no-whole-archive \
+            -Wl,--end-group \
             -L$INSTALL_DIR/lib \
             -lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread
 
           $STRIP $GITHUB_WORKSPACE/output_arm64/libffmpeg.so
+          
+          echo "Ukuran file akhir libffmpeg.so:"
+          ls -lh $GITHUB_WORKSPACE/output_arm64/libffmpeg.so
 
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
