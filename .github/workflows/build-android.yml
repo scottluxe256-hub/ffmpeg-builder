@@ -280,7 +280,7 @@ jobs:
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
             -I$INSTALL_DIR/include \
             -Wl,--allow-multiple-definition \
-            -Wl,--start-group \
+            -Wl,--whole-archive \
             $INSTALL_DIR/lib/libavformat.a \
             $INSTALL_DIR/lib/libavcodec.a \
             $INSTALL_DIR/lib/libavutil.a \
@@ -304,7 +304,7 @@ jobs:
             $INSTALL_DIR/lib/libpng.a \
             $JPEG_LIB \
             $INSTALL_DIR/lib/libzimg.a \
-            -Wl,--end-group \
+            -Wl,--no-whole-archive \
             -L$INSTALL_DIR/lib \
             -lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread
 
