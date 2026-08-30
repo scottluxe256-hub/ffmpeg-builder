@@ -76,7 +76,7 @@ jobs:
             --sysroot="$TOOLCHAIN/sysroot" \
             --enable-static --disable-shared \
             --disable-programs --disable-doc \
-            --disable-avdevice --disable-avfilter --disable-postproc \
+            --disable-avdevice --disable-avfilter \
             --disable-network \
             --disable-encoders --disable-muxers \
             --disable-zlib --disable-lzma --disable-bzlib --disable-iconv \
