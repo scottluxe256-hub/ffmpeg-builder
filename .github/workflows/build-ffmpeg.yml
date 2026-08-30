@@ -17,7 +17,7 @@ jobs:
       NDK_DIR: android-ndk-r26b
       INSTALL_DIR: ${{ github.workspace }}/build_assets
       API: "29"
-      CACHE_VERSION: v15-ffmpeg901-robust
+      CACHE_VERSION: v16-ffmpeg901-robust
 
     steps:
       - name: Checkout Repository
@@ -222,6 +222,8 @@ jobs:
           cmake --build "$SRC/x265-build" --parallel "$(nproc)"
           cmake --install "$SRC/x265-build"
 
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
+
           echo "=== [7/14] SVT-AV1 ==="
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cd "$SRC/SVT-AV1"
@@ -414,7 +416,7 @@ jobs:
             --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd"
             --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd"
             --extra-ldflags="-L$PREFIX/lib"
-            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread"
+            --extra-libs="-lx265 -lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread"
             --enable-gpl
             --enable-asm
             --enable-inline-asm
