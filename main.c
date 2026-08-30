@@ -103,8 +103,6 @@ int main(int argc, char *argv[]) {
     aacEncoder_SetParam(hAac, AACENC_SAMPLERATE, sample_rate);
     aacEncoder_SetParam(hAac, AACENC_CHANNELMODE, MODE_2);
     
-    // TRANSMUX = 0 (RAW STREAM untuk dikemas ke M4A / MP4)
-    // TRANSMUX = 2 (ADTS Stream jika file .aac)
     int is_mp4 = (strstr(output_file, ".m4a") || strstr(output_file, ".mp4"));
     aacEncoder_SetParam(hAac, AACENC_TRANSMUX, is_mp4 ? 0 : 2); 
 
@@ -129,7 +127,6 @@ int main(int argc, char *argv[]) {
     AVFormatContext *out_fmt_ctx = NULL;
     avformat_alloc_output_context2(&out_fmt_ctx, NULL, is_mp4 ? "mp4" : "adts", output_file);
     
-    // Safety check biar gak Segfault
     if (!out_fmt_ctx) {
         avformat_alloc_output_context2(&out_fmt_ctx, NULL, NULL, output_file);
     }
@@ -148,22 +145,6 @@ int main(int argc, char *argv[]) {
     out_stream->codecpar->sample_rate = sample_rate;
     out_stream->codecpar->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO;
     out_stream->codecpar->bit_rate = bitrate;
-
-    // Ambil Header DecoderConfig (esds) dari FDK-AAC untuk MP4 Container
-    AACENC_MetaData meta = {0};
-    aacEncGetLibInfo(&meta);
-    
-    HANDLE_AACENCODER hDummy = hAac;
-    AAC_STREAM_DATA stream_data = {0};
-    UCHAR conf_buf[64] = {0};
-    UINT conf_size = sizeof(conf_buf);
-    
-    // Ambil Decoder Specific Info (AudioSpecificConfig)
-    AACENC_OutArgs out_args_init = {0};
-    if (aacEncGetLibInfo(NULL) == 0) {
-        // Alokasikan extradata ESDS
-        out_stream->codecpar->extradata = (uint8_t *)av_mallocz(64 + AV_INPUT_BUFFER_PADDING_SIZE);
-    }
 
     if (!(out_fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
         if (avio_open(&out_fmt_ctx->pb, output_file, AVIO_FLAG_WRITE) < 0) {
