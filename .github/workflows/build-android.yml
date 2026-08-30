@@ -67,7 +67,7 @@ jobs:
           NDK_CMAKE="$NDK_PATH/build/cmake/android.toolchain.cmake"
           echo "NDK_CMAKE=$NDK_CMAKE" >> $GITHUB_ENV
 
-      # Cache Static Libraries (Menggunakan cache v7)
+      # Cache Static Libraries (Key dinaikkan ke v8 untuk rebuild dengan -fPIC)
       - name: Cache Compiled Dependencies
         id: cache-deps
         uses: actions/cache@v4
@@ -75,7 +75,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v7-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v8-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -84,7 +84,7 @@ jobs:
           cd $WORKSPACE
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
           cd fdk-aac && ./autogen.sh
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-shared --disable-static
           make -j$JOBS && $STRIP .libs/libfdk-aac.so
           cp .libs/libfdk-aac.so $GITHUB_WORKSPACE/output_arm64/libfdk_aac.so
@@ -93,20 +93,20 @@ jobs:
       - name: Build Audio Libraries
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           
           # Opus
           cd $WORKSPACE && git clone --depth 1 https://github.com/xiph/opus.git && cd opus
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$JOBS && make install
 
-          # MP3Lame
+          # MP3Lame (Penyebab error utama, ditambahkan -fPIC & --with-pic)
           cd $WORKSPACE && wget -q https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
           tar -xf lame-3.100.tar.gz && cd lame-3.100
-          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
+          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic
           make -j$JOBS && make install
 
-          # Ogg & Vorbis
+          # Ogg & Vorbis (Ditambahkan -fPIC)
           cd $WORKSPACE && git clone --depth 1 https://github.com/xiph/ogg.git && cd ogg
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$JOBS && make install
@@ -122,6 +122,7 @@ jobs:
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DWITH_OPENMP=OFF \
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_TESTS=OFF
@@ -131,7 +132,7 @@ jobs:
       - name: Build Video Codecs
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB CFLAGS="-fPIC" CXXFLAGS="-fPIC"
 
           # x264
           cd $WORKSPACE && git clone --depth 1 https://code.videolan.org/videolan/x264.git && cd x264
@@ -147,6 +148,7 @@ jobs:
             -DANDROID_PLATFORM=android-24 \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DENABLE_ASSEMBLY=OFF \
             -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON
           ninja -C x265/build install
@@ -167,6 +169,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           ninja -C SVT-AV1/build install
 
@@ -176,6 +179,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_SHARED_LIBS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TESTS=OFF -DENABLE_DOCS=OFF
           ninja -C aom/build install
 
@@ -197,7 +201,7 @@ jobs:
           cpu = 'armv8-a'
           endian = 'little'
           EOF
-          meson setup dav1d/build dav1d --cross-file $WORKSPACE/cross_android.meson --prefix $INSTALL_DIR --default-library static -Denable_tools=false -Denable_tests=false
+          meson setup dav1d/build dav1d --cross-file $WORKSPACE/cross_android.meson --prefix $INSTALL_DIR --default-library static -Denable_tools=false -Denable_tests=false -Db_pie=true
           ninja -C dav1d/build install
 
       # 5. IMAGE LIBRARIES ONLY (WEBP, PNG, JPEG, ZIMG)
@@ -210,6 +214,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF
           ninja -C build install
 
@@ -219,6 +224,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DPNG_SHARED=OFF
           ninja -C build install
 
@@ -228,12 +234,13 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DENABLE_SHARED=OFF
           ninja -C build install
 
           # zimg
           cd $WORKSPACE && git clone --recursive --depth 1 https://github.com/sekrit-twc/zimg.git && cd zimg
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$JOBS && make install
 
@@ -261,7 +268,7 @@ jobs:
 
           make -j$JOBS install
 
-      # 7. BUNDLE EVERYTHING INTO SINGLE LIBFFMPEG.SO (FIXED LINKER FLAGS)
+      # 7. BUNDLE EVERYTHING INTO SINGLE LIBFFMPEG.SO
       - name: Bundle into Single libffmpeg.so
         run: |
           echo "Menggabungkan static libraries jadi satu libffmpeg.so..."
@@ -270,7 +277,6 @@ jobs:
           JPEG_LIB="$INSTALL_DIR/lib/libjpeg.a"
           [ -f "$INSTALL_DIR/lib/libturbojpeg.a" ] && JPEG_LIB="$INSTALL_DIR/lib/libturbojpeg.a"
 
-          # Ditambahkan -Wl,--allow-multiple-definition agar simbol duplikat otomatis di-resolve oleh linker
           $TARGET_CC -shared -o $GITHUB_WORKSPACE/output_arm64/libffmpeg.so \
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
             -I$INSTALL_DIR/include \
