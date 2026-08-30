@@ -73,7 +73,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v11-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v12-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -185,7 +185,7 @@ jobs:
           cd $WORKSPACE && git clone --depth 1 https://github.com/xiph/rav1e.git && cd rav1e
           cargo cinstall --release --target aarch64-linux-android --prefix=$INSTALL_DIR --library-type=staticlib
 
-          # libdav1d (Fixed --default-library)
+          # libdav1d
           cd $WORKSPACE && git clone --depth 1 https://code.videolan.org/videolan/dav1d.git
           cat << EOF > $WORKSPACE/cross_android.meson
           [binaries]
@@ -242,7 +242,7 @@ jobs:
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
-      # 6. BUILD FFMPEG STATIC WITH FULL PIC ENFORCED
+      # 6. BUILD FFMPEG STATIC LIBRARIES
       - name: Build FFmpeg Static Libraries
         run: |
           cd $WORKSPACE
@@ -251,14 +251,15 @@ jobs:
 
           ./configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
-            --cc=$TARGET_CC --cxx=$TARGET_CXX --ar=$AR --ranlib=$RANLIB --strip=$STRIP \
+            --cc=$TARGET_CC --cxx=$TARGET_CXX --as=$TARGET_CC --ar=$AR --ranlib=$RANLIB --strip=$STRIP \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include -fPIC -DPIC" \
             --extra-cxxflags="-fPIC -DPIC" \
-            --extra-asflags="-fPIC -DPIC" \
             --extra-ldflags="-L$INSTALL_DIR/lib -lm -lstdc++" \
             --prefix=$INSTALL_DIR \
             --enable-pic \
+            --enable-asm \
+            --enable-inline-asm \
             --enable-static --disable-shared \
             --enable-gpl --disable-nonfree \
             --enable-jni --enable-mediacodec \
@@ -268,11 +269,11 @@ jobs:
           || { echo "----- ffbuild/config.log -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$JOBS install
-          
+
       # 7. LINK EVERYTHING INTO MONOLITHIC LIBFFMPEG.SO
       - name: Bundle into Single Monolithic libffmpeg.so
         run: |
-          echo "Menggabungkan semua static archives jadi satu libffmpeg.so raksasa..."
+          echo "Menggabungkan seluruh static archives menjadi satu libffmpeg.so..."
 
           JPEG_LIB="$INSTALL_DIR/lib/libjpeg.a"
           [ -f "$INSTALL_DIR/lib/libturbojpeg.a" ] && JPEG_LIB="$INSTALL_DIR/lib/libturbojpeg.a"
