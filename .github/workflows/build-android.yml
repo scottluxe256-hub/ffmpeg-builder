@@ -136,27 +136,27 @@ jobs:
           clone https://github.com/xiph/ogg.git ogg
           autoreconf_build "$SRC/ogg" "$PREFIX"
 
-          echo '=== libflac ==='
+          cho '=== libflac ==='
           clone https://github.com/xiph/flac.git flac
-          cd flac
 
-          autoreconf -fi
+          cmake -S flac -B flac/build \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_CXXLIBS=OFF \
+            -DBUILD_PROGRAMS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_TESTING=OFF \
+            -DWITH_OGG=ON \
+            -DOGG_ROOT="$PREFIX" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX"
 
-          ./configure \
-            --host="$HOST" \
-            --prefix="$PREFIX" \
-            --enable-static \
-            --disable-shared \
-            --disable-programs \
-            --disable-dependency-tracking \
-            --with-ogg="$PREFIX" \
-            CPPFLAGS="$CPPFLAGS" \
-            CFLAGS="$CFLAGS" \
-            LDFLAGS="$LDFLAGS"
-
-          make -j"$(nproc)"
-          make install
-
+          cmake --build flac/build --parallel "$(nproc)"
+          cmake --install flac/build
+          
           cd "$SRC"
 
           echo '=== libpng (NEON) ==='
