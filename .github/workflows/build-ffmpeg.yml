@@ -199,9 +199,9 @@ jobs:
             --sysroot="$TOOLCHAIN/sysroot" \
             --prefix="$PREFIX" \
             --enable-static \
-            --disable-shared \
-            --enable-pic \
             --disable-cli \
+            --enable-pic \
+            --disable-asm \
             --extra-cflags="$CFLAGS"
           make -j"$(nproc)"
           make install
