@@ -6,7 +6,7 @@ on:
     branches: [ main ]
     paths:
       - 'src/**'
-      - '.github/workflows/build-android.yml'
+      - '.github/workflows/build-fdk.yml'
 
 env:
   NDK_VERSION: r27c
