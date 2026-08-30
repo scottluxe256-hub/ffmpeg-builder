@@ -75,7 +75,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v3-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v4-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -135,7 +135,7 @@ jobs:
           ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-cli --enable-pic
           make -j$JOBS && make install
 
-          # x265 (Fixed Assembly Flag & NDK Toolchain)
+          # x265
           cd $WORKSPACE && git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git x265
           rm -rf x265/.git && echo "3.5" > x265/source/VERSION
           cmake -G "Ninja" -S x265/source -B x265/build \
@@ -197,8 +197,8 @@ jobs:
           meson setup dav1d/build dav1d --cross-file $WORKSPACE/cross_android.meson --prefix $INSTALL_DIR --default-library static -Denable_tools=false -Denable_tests=false
           ninja -C dav1d/build install
 
-      # 5. IMAGE & SUBTITLE LIBRARIES
-      - name: Build Image & Subtitle Libraries
+      # 5. IMAGE LIBRARIES ONLY (WEBP, PNG, JPEG, ZIMG)
+      - name: Build Image Libraries
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           # libwebp
@@ -234,21 +234,6 @@ jobs:
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$JOBS && make install
 
-          # FreeType
-          cd $WORKSPACE && git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git && cd freetype
-          cmake -G "Ninja" -S . -B build \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-24 \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF
-          ninja -C build install
-
-          # libass
-          cd $WORKSPACE && git clone --depth 1 https://github.com/libass/libass.git && cd libass
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
-          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
-          make -j$JOBS && make install
-
       # 6. BUILD FFMPEG STATIC WITH ALL LIBRARIES
       - name: Build FFmpeg Static Libraries
         run: |
@@ -268,7 +253,7 @@ jobs:
             --enable-mediacodec \
             --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus --enable-libmp3lame --enable-libvorbis --enable-libsoxr \
             --enable-libsvtav1 --enable-libaom --enable-librav1e --enable-libdav1d \
-            --enable-libwebp --enable-zimg --enable-libfreetype --enable-libass \
+            --enable-libwebp --enable-zimg \
           || { echo "----- ffbuild/config.log -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$JOBS install
@@ -276,7 +261,7 @@ jobs:
       # 7. BUNDLE EVERYTHING INTO SINGLE LIBFFMPEG.SO
       - name: Bundle into Single libffmpeg.so
         run: |
-          echo "Menggabungkan SEMUA static libraries (Video, Audio, Image, Subtitle) jadi satu libffmpeg.so..."
+          echo "Menggabungkan static libraries jadi satu libffmpeg.so..."
           
           $TARGET_CC -shared -o $GITHUB_WORKSPACE/output_arm64/libffmpeg.so \
             $GITHUB_WORKSPACE/jni/ffmpeg_jni.c \
@@ -305,8 +290,6 @@ jobs:
             $INSTALL_DIR/lib/libpng.a \
             $INSTALL_DIR/lib/libjpeg.a \
             $INSTALL_DIR/lib/libzimg.a \
-            $INSTALL_DIR/lib/libfreetype.a \
-            $INSTALL_DIR/lib/libass.a \
             -Wl,--no-whole-archive \
             -L$INSTALL_DIR/lib \
             -lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread
