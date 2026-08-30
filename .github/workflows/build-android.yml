@@ -67,7 +67,7 @@ jobs:
           NDK_CMAKE="$NDK_PATH/build/cmake/android.toolchain.cmake"
           echo "NDK_CMAKE=$NDK_CMAKE" >> $GITHUB_ENV
 
-      # Cache Static Libraries
+      # Cache Static Libraries (Key dinaikkan ke v7 agar build soxr terbarui)
       - name: Cache Compiled Dependencies
         id: cache-deps
         uses: actions/cache@v4
@@ -75,7 +75,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v6-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v7-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -115,13 +115,16 @@ jobs:
           ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
           make -j$JOBS && make install
 
-          # Soxr (Resampler)
+          # Soxr (Resampler) - Matikan OpenMP agar tidak butuh libomp di Android
           cd $WORKSPACE && git clone --depth 1 https://git.code.sf.net/p/soxr/code soxr
           cmake -G "Ninja" -S soxr -B soxr/build \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_CMAKE \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DWITH_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF
           ninja -C soxr/build install
 
       # 3. VIDEO CODECS (X264, X265, VPX)
