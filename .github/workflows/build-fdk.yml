@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Android NDK
-        uses: nsdm/setup-android-ndk@v1
+        uses: nsetup/setup-android-ndk@v1.0.0
         with:
           ndk-version: 'r25c'
 
@@ -25,7 +25,7 @@ jobs:
         with:
           path: |
             build_deps
-          key: fdk-deps-arm64-v3-${{ hashFiles('**/build-fdk.yml') }}
+          key: fdk-deps-arm64-v4-${{ hashFiles('**/build-fdk.yml') }}
 
       - name: Build fdk-aac & FFmpeg Libraries (Static)
         run: |
