@@ -28,17 +28,16 @@ jobs:
           rustup target add aarch64-linux-android
           cargo install cargo-ndk
 
-      # Gunakan curl dengan --retry agar anti-gagal/exit code 8
+      # Gunakan GitHub Action NDK (Bebas dari masalah download Google URL)
       - name: Setup Android NDK r26b
-        working-directory: /home/runner
-        run: |
-          curl -L --retry 5 --retry-delay 3 -O https://dl.google.com/android/repository/android-ndk-r26b-linux.tar.gz
-          tar -xf android-ndk-r26b-linux.tar.gz
-          rm android-ndk-r26b-linux.tar.gz
-          echo "NDK_PATH=/home/runner/android-ndk-r26b" >> $GITHUB_ENV
+        uses: nsetup/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
 
       - name: Setup Toolchain & Directories
         run: |
+          echo "NDK_PATH=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
           echo "TARGET_API=29" >> $GITHUB_ENV
           echo "BUILD_DIR=$GITHUB_WORKSPACE/build_space" >> $GITHUB_ENV
           echo "PREFIX_GPL=$GITHUB_WORKSPACE/dist/gpl" >> $GITHUB_ENV
@@ -68,7 +67,7 @@ jobs:
 
           cd $BUILD_DIR
 
-          # 1. zlib (Dependency libpng & libflac)
+          # 1. zlib
           git clone --depth 1 https://github.com/madler/zlib.git
           cd zlib
           ./configure --prefix=$BUILD_DIR/out_zlib --static
@@ -76,7 +75,7 @@ jobs:
           install_libs $BUILD_DIR/out_zlib
           cd $BUILD_DIR
 
-          # 2. libogg (Dependency vorbis & flac)
+          # 2. libogg
           git clone --depth 1 https://github.com/xiph/ogg.git
           cd ogg
           ./autogen.sh
@@ -85,7 +84,7 @@ jobs:
           install_libs $BUILD_DIR/out_ogg
           cd $BUILD_DIR
 
-          # 3. libflac (Lossless Audio)
+          # 3. libflac
           git clone --depth 1 https://github.com/xiph/flac.git
           cd flac
           ./autogen.sh
@@ -206,7 +205,7 @@ jobs:
           cd $BUILD_DIR
 
       # -------------------------------------------------------------
-      # BUILD 1: FFmpeg GPL Free
+      # BUILD 1: FFmpeg Master - GPL Free
       # -------------------------------------------------------------
       - name: Compile FFmpeg Master - GPL Free
         run: |
@@ -263,7 +262,7 @@ jobs:
           mv ffmpeg $GITHUB_WORKSPACE/ffmpeg-android-gpl
 
       # -------------------------------------------------------------
-      # BUILD 2: FFmpeg NonFree (With libfdk-aac)
+      # BUILD 2: FFmpeg Master - NonFree (With libfdk-aac)
       # -------------------------------------------------------------
       - name: Compile FFmpeg Master - NonFree
         run: |
