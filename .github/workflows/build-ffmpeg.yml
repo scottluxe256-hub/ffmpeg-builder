@@ -99,17 +99,18 @@ jobs:
             -DENABLE_CLI=OFF \
             -DENABLE_ASSEMBLY=OFF
           cmake --build "$SRC/x265-b" && cmake --install "$SRC/x265-b"
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lm -ldl -pthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265\nLibs.private: -lc++_static -lc++abi -lm -ldl -pthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
           # 7. SVT-AV1
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cmake_android "$SRC/SVT-AV1" "$SRC/SVT-AV1-b" -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           cmake --build "$SRC/SVT-AV1-b" && cmake --install "$SRC/SVT-AV1-b"
 
-          # 8. libaom
+          # 8. libaom (Fix + Custom .pc Generator)
           clone https://aomedia.googlesource.com/aom "$SRC/aom"
           cmake_android "$SRC/aom" "$SRC/aom-b" -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TOOLS=OFF -DENABLE_NEON=ON
           cmake --build "$SRC/aom-b" && cmake --install "$SRC/aom-b"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom\nLibs.private: -lc++_static -lc++abi -lm -ldl -pthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
           # 9. libvpx
           clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
@@ -134,10 +135,11 @@ jobs:
           ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
           make -j$(nproc) && make install
 
-          # 13. webp
+          # 13. webp (Fix + Custom .pc Generator)
           clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
           cmake_android "$SRC/libwebp" "$SRC/libwebp-b" -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_ENABLE_SIMD=ON
           cmake --build "$SRC/libwebp-b" && cmake --install "$SRC/libwebp-b"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv\nLibs.private: -lm -pthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
 
           # 14. fdk-aac
           clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
@@ -154,9 +156,8 @@ jobs:
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
 
           cd "$ROOT"
-          wget -q "https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz" || wget -q "https://ffmpeg.org/releases/ffmpeg-6.1.1.tar.xz"
-          tar -xJf ffmpeg-*.tar.xz
-          FFMPEG_DIR=$(ls -d ffmpeg-*/ | head -n 1)
+          wget -q "https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz"
+          tar -xJf ffmpeg-7.1.tar.xz
 
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
@@ -175,7 +176,7 @@ jobs:
             --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
             --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
             --extra-ldflags="-L$PREFIX/lib -static-libstdc++"
-            --extra-libs="-lm -ldl -lz -llog -landroid -pthread"
+            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread"
             --enable-static
             --disable-shared
             --enable-asm
@@ -196,7 +197,7 @@ jobs:
           )
 
           # Build GPL Version
-          cp -r "$FFMPEG_DIR" ffmpeg-gpl && cd ffmpeg-gpl
+          cp -r ffmpeg-7.1 ffmpeg-gpl && cd ffmpeg-gpl
           ./configure "${FLAGS[@]}" --enable-gpl
           make -j$(nproc)
           mkdir -p "$ROOT/dist/gpl"
@@ -204,11 +205,24 @@ jobs:
 
           # Build Nonfree Version
           cd "$ROOT"
-          cp -r "$FFMPEG_DIR" ffmpeg-nonfree && cd ffmpeg-nonfree
+          cp -r ffmpeg-7.1 ffmpeg-nonfree && cd ffmpeg-nonfree
           ./configure "${FLAGS[@]}" --enable-gpl --enable-nonfree --enable-libfdk-aac
           make -j$(nproc)
           mkdir -p "$ROOT/dist/nonfree"
           cp ffmpeg "$ROOT/dist/nonfree/ffmpeg-nonfree"
+
+          # --- VERIFIKASI WAJIB: Gagal otomatis jika library hilang ---
+          echo "=== VERIFIKASI CODEC WAJIB ==="
+          ./ffmpeg -buildconf > buildconf.txt
+          cat buildconf.txt
+          
+          for lib in "libaom" "libwebp" "libzimg"; do
+            if ! grep -q "--enable-$lib" buildconf.txt; then
+              echo "CRITICAL ERROR: $lib TIDAK TERDETEKSI DI RESULT BUILD!"
+              exit 1
+            fi
+          done
+          echo "VERIFIKASI BERHASIL: Semua library wajib (aom, webp, zimg) terpasang!"
 
           # Packing ke ZIP
           cd "$ROOT/dist"
