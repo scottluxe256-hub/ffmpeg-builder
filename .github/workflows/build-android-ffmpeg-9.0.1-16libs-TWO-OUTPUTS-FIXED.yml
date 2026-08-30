@@ -94,7 +94,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           source "$HOME/.cargo/env"
           rustup target add aarch64-linux-android
-          cargo install cargo-c --locked
+          cargo install cargo-c --locked --features=vendored
 
       - name: Cache External Libraries and CCache
         id: cache-libs
