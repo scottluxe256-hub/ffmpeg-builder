@@ -136,7 +136,7 @@ jobs:
           clone https://github.com/xiph/ogg.git ogg
           autoreconf_build "$SRC/ogg" "$PREFIX"
 
-          cho '=== libflac ==='
+          echo '=== libflac ==='
           clone https://github.com/xiph/flac.git flac
 
           cmake -S flac -B flac/build \
