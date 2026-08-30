@@ -91,13 +91,26 @@ jobs:
           ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-cli --enable-pic --enable-asm
           make -j$(nproc) && make install
 
-          # 6. x265 (Fixed CMake build & pkg-config generation)
+          # 6. x265
           clone https://github.com/videolan/x265.git "$SRC/x265"
           cmake_android "$SRC/x265/source" "$SRC/x265-b" \
             -DENABLE_SHARED=OFF \
             -DENABLE_CLI=OFF \
             -DENABLE_ASSEMBLY=OFF
           cmake --build "$SRC/x265-b" && cmake --install "$SRC/x265-b"
+
+          cat <<EOF > "$PREFIX/lib/pkgconfig/x265.pc"
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: x265
+Description: H.265/HEVC video encoder
+Version: 3.5
+Libs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm -ldl -pthread
+Cflags: -I\${includedir}
+EOF
 
           # 7. SVT-AV1
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
