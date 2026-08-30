@@ -336,10 +336,10 @@ jobs:
           make -j"$(nproc)"
           make install
 
-          echo "=== Validasi Hasil Build External Libraries ==="
+                    echo "=== Validasi Hasil Build External Libraries ==="
           test -f "$PREFIX/lib/libz.a"
           test -f "$PREFIX/lib/libogg.a"
-          test -f "$PREFIX/lib/libpng16.a"
+          test -f "$PREFIX/lib/libpng.a"
           test -f "$PREFIX/lib/libx264.a"
           test -f "$PREFIX/lib/libx265.a"
           test -f "$PREFIX/lib/libSvtAv1Enc.a"
@@ -362,7 +362,7 @@ jobs:
           test -f "$PREFIX/.external-libs-complete"
           test -f "$PREFIX/lib/libz.a"
           test -f "$PREFIX/lib/libogg.a"
-          test -f "$PREFIX/lib/libpng16.a"
+          test -f "$PREFIX/lib/libpng.a"
           test -f "$PREFIX/lib/libx264.a"
           test -f "$PREFIX/lib/libx265.a"
           test -f "$PREFIX/lib/libSvtAv1Enc.a"
