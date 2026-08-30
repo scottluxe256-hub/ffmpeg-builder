@@ -17,7 +17,7 @@ jobs:
       NDK_DIR: android-ndk-r26b
       INSTALL_DIR: ${{ github.workspace }}/build_assets
       API: "29"
-      CACHE_VERSION: v14-ffmpeg901-norust
+      CACHE_VERSION: v15-ffmpeg901-robust
 
     steps:
       - name: Checkout Repository
@@ -52,33 +52,35 @@ jobs:
             -O android-ndk-r26b-linux.zip
           unzip -q android-ndk-r26b-linux.zip
 
-      - name: Setup Environment
+      - name: Setup Environment & Toolchain Wrappers
         run: |
           set -euxo pipefail
 
-          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> "$GITHUB_ENV"
-          echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> "$GITHUB_ENV"
+          NDK_PATH="$GITHUB_WORKSPACE/android-ndk-r26b"
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          BIN_WRAPPER="$GITHUB_WORKSPACE/bin_wrapper"
+
+          echo "NDK_PATH=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
           echo "INSTALL_DIR=$GITHUB_WORKSPACE/build_assets" >> "$GITHUB_ENV"
 
           mkdir -p "$GITHUB_WORKSPACE/build_assets/lib/pkgconfig"
-          mkdir -p "$GITHUB_WORKSPACE/bin_wrapper"
+          mkdir -p "$BIN_WRAPPER"
 
-          TOOLCHAIN="$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64"
-
-          for tool in ar as nm ranlib strip strings objcopy; do
-            ln -sf "$TOOLCHAIN/bin/llvm-$tool" \
-              "$GITHUB_WORKSPACE/bin_wrapper/aarch64-linux-android-$tool"
+          # Buat symlink komplit untuk library tua yang butuh binutils ber-prefix
+          for tool in ar as nm ranlib strip strings objcopy readelf; do
+            ln -sf "$TOOLCHAIN/bin/llvm-$tool" "$BIN_WRAPPER/aarch64-linux-android-$tool"
           done
 
-          ln -sf "$TOOLCHAIN/bin/ld.lld" \
-            "$GITHUB_WORKSPACE/bin_wrapper/aarch64-linux-android-ld"
+          ln -sf "$TOOLCHAIN/bin/aarch64-linux-android29-clang" "$BIN_WRAPPER/aarch64-linux-android-gcc"
+          ln -sf "$TOOLCHAIN/bin/aarch64-linux-android29-clang++" "$BIN_WRAPPER/aarch64-linux-android-g++"
+          ln -sf "$TOOLCHAIN/bin/ld.lld" "$BIN_WRAPPER/aarch64-linux-android-ld"
 
-          echo "$GITHUB_WORKSPACE/bin_wrapper" >> "$GITHUB_PATH"
+          echo "$BIN_WRAPPER" >> "$GITHUB_PATH"
 
           echo "PKG_CONFIG_PATH=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_LIBDIR=$GITHUB_WORKSPACE/build_assets/lib/pkgconfig" >> "$GITHUB_ENV"
-
-          echo "PATH=$GITHUB_WORKSPACE/bin_wrapper:$TOOLCHAIN/bin:$PATH" >> "$GITHUB_ENV"
+          echo "PATH=$BIN_WRAPPER:$TOOLCHAIN/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Configure CCache
         run: |
@@ -184,7 +186,7 @@ jobs:
             --enable-static \
             --disable-shared \
             --disable-dependency-tracking \
-            CC="$CC" CXX="$CXX" \
+            CC="$CC" CXX="$CXX" AR="$AR" RANLIB="$RANLIB" \
             CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" \
             CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
           make -j"$(nproc)"
@@ -195,13 +197,15 @@ jobs:
           cd "$SRC/x264"
           ./configure \
             --host="$HOST" \
-            --cross-prefix="$TOOLCHAIN/bin/aarch64-linux-android-" \
             --sysroot="$TOOLCHAIN/sysroot" \
             --prefix="$PREFIX" \
             --enable-static \
             --disable-cli \
             --enable-pic \
             --disable-asm \
+            --cc="$CC" \
+            --ar="$AR" \
+            --strip="$STRIP" \
             --extra-cflags="$CFLAGS"
           make -j"$(nproc)"
           make install
@@ -212,7 +216,8 @@ jobs:
             -DENABLE_SHARED=OFF \
             -DENABLE_CLI=OFF \
             -DEXPORT_C_API=ON \
-            -DENABLE_ASSEMBLY=ON \
+            -DENABLE_ASSEMBLY=OFF \
+            -DENABLE_PIC=ON \
             -DCROSS_COMPILE_ARM=1
           cmake --build "$SRC/x265-build" --parallel "$(nproc)"
           cmake --install "$SRC/x265-build"
@@ -243,14 +248,15 @@ jobs:
           clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
           mkdir -p "$SRC/libvpx-build"
           cd "$SRC/libvpx-build"
-          ../libvpx/configure \
-            --target=arm64-android-gcc \
+          CC="$CC" CXX="$CXX" AR="$AR" LD="$LD" ../libvpx/configure \
+            --target=generic-gnu \
             --prefix="$PREFIX" \
             --disable-shared \
             --enable-static \
             --disable-examples \
             --disable-tools \
             --disable-unit-tests \
+            --disable-docs \
             --enable-pic \
             --extra-cflags="$CFLAGS"
           make -j"$(nproc)"
@@ -292,7 +298,7 @@ jobs:
             --enable-static \
             --disable-shared \
             --disable-dependency-tracking \
-            CC="$CC" CFLAGS="$CFLAGS" \
+            CC="$CC" AR="$AR" RANLIB="$RANLIB" CFLAGS="$CFLAGS" \
             CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS" \
             OGG_CFLAGS="-I$PREFIX/include" \
             OGG_LIBS="-L$PREFIX/lib -logg"
@@ -324,24 +330,13 @@ jobs:
             --prefix="$PREFIX" \
             --enable-static \
             --disable-shared \
-            CC="$CC" CXX="$CXX" \
+            CC="$CC" CXX="$CXX" AR="$AR" RANLIB="$RANLIB" \
             CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" \
             CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
           make -j"$(nproc)"
           make install
 
-          echo "=== Validasi pkg-config ==="
-          pkg-config --exists ogg
-          pkg-config --exists libpng
-          pkg-config --exists x264
-          pkg-config --exists SvtAv1Enc
-          pkg-config --exists aom
-          pkg-config --exists vpx
-          pkg-config --exists opus
-          pkg-config --exists vorbis
-          pkg-config --exists libmp3lame
-          pkg-config --exists libwebp
-
+          echo "=== Validasi Hasil Build External Libraries ==="
           test -f "$PREFIX/lib/libz.a"
           test -f "$PREFIX/lib/libogg.a"
           test -f "$PREFIX/lib/libpng16.a"
@@ -403,14 +398,53 @@ jobs:
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
-          export COMMON_CONFIG="--target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile --cc=$TOOLCHAIN/bin/aarch64-linux-android29-clang --cxx=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ --ar=aarch64-linux-android-ar --ranlib=aarch64-linux-android-ranlib --strip=aarch64-linux-android-strip --nm=aarch64-linux-android-nm --pkg-config=pkg-config --pkg-config-flags=--static --extra-cflags=-I$PREFIX/include\ -O3\ -fPIC\ -march=armv8-a+simd --extra-cxxflags=-I$PREFIX/include\ -O3\ -fPIC\ -march=armv8-a+simd --extra-ldflags=-L$PREFIX/lib --extra-libs=-lc++_static\ -lc++abi\ -lm\ -ldl\ -lz\ -llog\ -landroid\ -pthread --enable-gpl --enable-asm --enable-inline-asm --enable-neon --enable-jni --enable-mediacodec --enable-zlib --enable-libpng --enable-libzimg --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libwebp --disable-doc --disable-debug --enable-static --disable-shared"
+          COMMON_FLAGS=(
+            --target-os=android
+            --arch=aarch64
+            --cpu=armv8-a
+            --enable-cross-compile
+            --cc="$TOOLCHAIN/bin/aarch64-linux-android29-clang"
+            --cxx="$TOOLCHAIN/bin/aarch64-linux-android29-clang++"
+            --ar="$TOOLCHAIN/bin/llvm-ar"
+            --ranlib="$TOOLCHAIN/bin/llvm-ranlib"
+            --strip="$TOOLCHAIN/bin/llvm-strip"
+            --nm="$TOOLCHAIN/bin/llvm-nm"
+            --pkg-config=pkg-config
+            --pkg-config-flags=--static
+            --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd"
+            --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd"
+            --extra-ldflags="-L$PREFIX/lib"
+            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread"
+            --enable-gpl
+            --enable-asm
+            --enable-inline-asm
+            --enable-neon
+            --enable-jni
+            --enable-mediacodec
+            --enable-zlib
+            --enable-libpng
+            --enable-libzimg
+            --enable-libx264
+            --enable-libx265
+            --enable-libsvtav1
+            --enable-libaom
+            --enable-libvpx
+            --enable-libmp3lame
+            --enable-libopus
+            --enable-libvorbis
+            --enable-libwebp
+            --disable-doc
+            --disable-debug
+            --enable-static
+            --disable-shared
+          )
 
           echo "=== BUILD 1/2: FFmpeg GPL ==="
           rm -rf "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-gpl"
           cp -a "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}" "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-gpl"
           cd "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-gpl"
 
-          ./configure $COMMON_CONFIG --prefix="$ROOT/out/ffmpeg-android-aarch64-gpl"
+          ./configure "${COMMON_FLAGS[@]}" --prefix="$ROOT/out/ffmpeg-android-aarch64-gpl"
           make -j"$(nproc)"
           make install
 
@@ -422,7 +456,7 @@ jobs:
           cp -a "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}" "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-nonfree"
           cd "$ROOT/ffmpeg_source/ffmpeg-${FFMPEG_VERSION}-nonfree"
 
-          ./configure $COMMON_CONFIG --enable-nonfree --enable-libfdk-aac --prefix="$ROOT/out/ffmpeg-android-aarch64-nonfree"
+          ./configure "${COMMON_FLAGS[@]}" --enable-nonfree --enable-libfdk-aac --prefix="$ROOT/out/ffmpeg-android-aarch64-nonfree"
           make -j"$(nproc)"
           make install
 
