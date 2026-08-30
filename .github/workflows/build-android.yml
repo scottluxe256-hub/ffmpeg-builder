@@ -73,7 +73,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v10-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v11-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -87,7 +87,7 @@ jobs:
           make -j$JOBS && $STRIP .libs/libfdk-aac.so
           cp .libs/libfdk-aac.so $GITHUB_WORKSPACE/output_arm64/libfdk_aac.so
 
-      # 2. AUDIO LIBRARIES
+      # 2. AUDIO LIBRARIES (OPUS, MP3LAME, VORBIS, SOXR)
       - name: Build Audio Libraries
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
@@ -126,7 +126,7 @@ jobs:
             -DBUILD_TESTS=OFF
           ninja -C soxr/build install
 
-      # 3. VIDEO CODECS
+      # 3. VIDEO CODECS (X264, X265, VPX)
       - name: Build Video Codecs
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
@@ -185,7 +185,7 @@ jobs:
           cd $WORKSPACE && git clone --depth 1 https://github.com/xiph/rav1e.git && cd rav1e
           cargo cinstall --release --target aarch64-linux-android --prefix=$INSTALL_DIR --library-type=staticlib
 
-          # libdav1d
+          # libdav1d (Fixed --default-library)
           cd $WORKSPACE && git clone --depth 1 https://code.videolan.org/videolan/dav1d.git
           cat << EOF > $WORKSPACE/cross_android.meson
           [binaries]
@@ -199,7 +199,7 @@ jobs:
           cpu = 'armv8-a'
           endian = 'little'
           EOF
-          meson setup dav1d/build dav1d --cross-file $WORKSPACE/cross_android.meson --prefix $INSTALL_DIR --defaultlibrary static -Denable_tools=false -Denable_tests=false -Db_pie=true
+          meson setup dav1d/build dav1d --cross-file $WORKSPACE/cross_android.meson --prefix $INSTALL_DIR --default-library static -Denable_tools=false -Denable_tests=false -Db_pie=true
           ninja -C dav1d/build install
 
       # 5. IMAGE LIBRARIES
