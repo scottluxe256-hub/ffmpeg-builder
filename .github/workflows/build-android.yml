@@ -67,7 +67,7 @@ jobs:
           NDK_CMAKE="$NDK_PATH/build/cmake/android.toolchain.cmake"
           echo "NDK_CMAKE=$NDK_CMAKE" >> $GITHUB_ENV
 
-      # Cache Static Libraries (Key dinaikkan ke v8 untuk rebuild dengan -fPIC)
+      # Cache Key dinaikkan ke v9 untuk memaksa Rebuild Bersih dengan -fPIC
       - name: Cache Compiled Dependencies
         id: cache-deps
         uses: actions/cache@v4
@@ -75,7 +75,7 @@ jobs:
           path: |
             /dev/shm/build_space/build_assets_arm64
             output_arm64/libfdk_aac.so
-          key: arm64-deps-v8-${{ hashFiles('.github/workflows/build-android.yml') }}
+          key: arm64-deps-v9-${{ hashFiles('.github/workflows/build-android.yml') }}
 
       # 1. BUILD LIBFDK-AAC STANDALONE PLUGIN (.SO)
       - name: Build Standalone Plugin libfdk_aac.so
@@ -84,8 +84,8 @@ jobs:
           cd $WORKSPACE
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
           cd fdk-aac && ./autogen.sh
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB CFLAGS="-fPIC" CXXFLAGS="-fPIC"
-          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-shared --disable-static
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
+          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-shared --disable-static CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && $STRIP .libs/libfdk-aac.so
           cp .libs/libfdk-aac.so $GITHUB_WORKSPACE/output_arm64/libfdk_aac.so
 
@@ -93,26 +93,26 @@ jobs:
       - name: Build Audio Libraries
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB CFLAGS="-fPIC" CXXFLAGS="-fPIC"
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
           
           # Opus
           cd $WORKSPACE && git clone --depth 1 https://github.com/xiph/opus.git && cd opus
-          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
+          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
-          # MP3Lame (Penyebab error utama, ditambahkan -fPIC & --with-pic)
+          # MP3Lame (Perbaikan Utama: --with-pic & CFLAGS -fPIC)
           cd $WORKSPACE && wget -q https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
           tar -xf lame-3.100.tar.gz && cd lame-3.100
-          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic
+          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared --with-pic CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
-          # Ogg & Vorbis (Ditambahkan -fPIC)
+          # Ogg & Vorbis
           cd $WORKSPACE && git clone --depth 1 https://github.com/xiph/ogg.git && cd ogg
-          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
+          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
           
           cd $WORKSPACE && git clone --depth 1 https://github.com/xiph/vorbis.git && cd vorbis
-          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
+          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
           # Soxr (Resampler)
@@ -132,11 +132,11 @@ jobs:
       - name: Build Video Codecs
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB CFLAGS="-fPIC" CXXFLAGS="-fPIC"
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
 
           # x264
           cd $WORKSPACE && git clone --depth 1 https://code.videolan.org/videolan/x264.git && cd x264
-          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-cli --enable-pic
+          ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-cli --enable-pic CFLAGS="-fPIC"
           make -j$JOBS && make install
 
           # x265
@@ -240,8 +240,8 @@ jobs:
 
           # zimg
           cd $WORKSPACE && git clone --recursive --depth 1 https://github.com/sekrit-twc/zimg.git && cd zimg
-          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB CFLAGS="-fPIC" CXXFLAGS="-fPIC"
-          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared
+          export CC=$TARGET_CC CXX=$TARGET_CXX AR=$AR RANLIB=$RANLIB
+          ./autogen.sh && ./configure --host=aarch64-linux-android --prefix=$INSTALL_DIR --enable-static --disable-shared CFLAGS="-fPIC" CXXFLAGS="-fPIC"
           make -j$JOBS && make install
 
       # 6. BUILD FFMPEG STATIC WITH ALL LIBRARIES
@@ -273,7 +273,6 @@ jobs:
         run: |
           echo "Menggabungkan static libraries jadi satu libffmpeg.so..."
           
-          # Deteksi nama file JPEG turbo (libturbojpeg.a / libjpeg.a)
           JPEG_LIB="$INSTALL_DIR/lib/libjpeg.a"
           [ -f "$INSTALL_DIR/lib/libturbojpeg.a" ] && JPEG_LIB="$INSTALL_DIR/lib/libturbojpeg.a"
 
