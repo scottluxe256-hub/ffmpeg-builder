@@ -1,364 +1,494 @@
-name: Build Fresh FFmpeg Master Complete for Android (aarch64)
+```yaml
+name: Build FFmpeg Master - Android ARM64 Complete
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  build-android-arm64:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # CACHE: Menyimpan hasil kompilasi library agar tidak diulang dari nol
-      - name: Cache External Libraries
-        uses: actions/cache@v4
-        with:
-          path: |
-            build_space/out_*
-            dist/gpl
-            dist/nonfree
-          key: ${{ runner.os }}-ffmpeg-libs-${{ hashFiles('**/build-android.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-ffmpeg-libs-
-
-      # 1. Hapus ruang disk SEBELUM setup NDK
-      - name: Free Disk Space
+      - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk 2>/dev/null || true
+          df -h /
 
-      # 2. Setup NDK (Action yang benar untuk Enterprise)
-      - name: Setup Android NDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
-          ndk-version: r25c
+          distribution: temurin
+          java-version: '17'
 
-      - name: Install Build Tools & Rust Setup
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android NDK r25c
+        run: |
+          sdkmanager --install "platforms;android-29" "build-tools;35.0.0" "ndk;25.2.9519653" "cmake;3.22.1"
+          yes | sdkmanager --licenses >/dev/null || true
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build autoconf automake libtool libtool-bin \
-            pkg-config git curl wget unzip python3 yasm nasm texinfo gawk
-          
-          rustup target add aarch64-linux-android
-          cargo install cargo-ndk --locked
+          sudo apt-get install -y \
+            build-essential autoconf automake libtool libtool-bin pkg-config \
+            cmake ninja-build meson git curl wget unzip python3 python3-pip \
+            yasm nasm texinfo gawk gettext autopoint bison flex \
+            ca-certificates libssl-dev
 
-      # -------------------------------------------------------------
-      # COMPILE ALL EXTERNAL LIBRARIES
-      # -------------------------------------------------------------
-      - name: Build All External Libraries
+      - name: Setup Rust for rav1e
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-c
+        run: cargo install cargo-c --locked
+
+      - name: Build all external libraries
+        shell: bash
         run: |
-          NDK_PATH="$ANDROID_NDK_HOME"
-          echo "=== NDK FOUND AT: $NDK_PATH ==="
-          
-          export ANDROID_NDK_HOME=$NDK_PATH
-          BUILD_DIR=$GITHUB_WORKSPACE/build_space
-          PREFIX_GPL=$GITHUB_WORKSPACE/dist/gpl
-          PREFIX_NONFREE=$GITHUB_WORKSPACE/dist/nonfree
-          
-          mkdir -p $BUILD_DIR $PREFIX_GPL/include $PREFIX_GPL/lib/pkgconfig $PREFIX_NONFREE/include $PREFIX_NONFREE/lib/pkgconfig
+          set -euxo pipefail
 
-          export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
-          export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
-          export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
-          export AR=$TOOLCHAIN/bin/llvm-ar
-          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-          export STRIP=$TOOLCHAIN/bin/llvm-strip
-          export AS=$TOOLCHAIN/bin/llvm-as
-          export NM=$TOOLCHAIN/bin/llvm-nm
-          export LD=$TOOLCHAIN/bin/ld.lld
+          ROOT="$GITHUB_WORKSPACE"
+          SRC="$ROOT/build_space/src"
+          PREFIX="$ROOT/build_space/prefix"
+          NDK="$ANDROID_NDK_HOME"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          SYSROOT="$TOOLCHAIN/sysroot"
+          HOST="aarch64-linux-android"
 
-          export CFLAGS="-O3 -ftree-vectorize -march=armv8-a+simd+crypto -fPIC -D__ANDROID_API__=29"
+          rm -rf "$ROOT/build_space"
+          mkdir -p "$SRC" "$PREFIX/include" "$PREFIX/lib/pkgconfig" "$PREFIX/bin"
+
+          export PATH="$TOOLCHAIN/bin:$PREFIX/bin:$HOME/.cargo/bin:$PATH"
+
+          export CC="$TOOLCHAIN/bin/aarch64-linux-android29-clang"
+          export CXX="$TOOLCHAIN/bin/aarch64-linux-android29-clang++"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/bin/llvm-strip"
+          export NM="$TOOLCHAIN/bin/llvm-nm"
+          export LD="$TOOLCHAIN/bin/ld.lld"
+
+          export CFLAGS="-O3 -fPIC -march=armv8-a+simd -D__ANDROID_API__=29"
           export CXXFLAGS="$CFLAGS"
-          export LDFLAGS="-Wl,--gc-sections"
-          export PKG_CONFIG_PATH="$PREFIX_GPL/lib/pkgconfig:$PREFIX_NONFREE/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export LDFLAGS="-L$PREFIX/lib -Wl,--gc-sections"
+          export CPPFLAGS="-I$PREFIX/include"
 
-          install_libs() {
-            cp -r $1/include/* $PREFIX_GPL/include/ 2>/dev/null || true
-            cp -r $1/lib/* $PREFIX_GPL/lib/ 2>/dev/null || true
-            cp -r $1/include/* $PREFIX_NONFREE/include/ 2>/dev/null || true
-            cp -r $1/lib/* $PREFIX_NONFREE/lib/ 2>/dev/null || true
+          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+
+          clone() {
+            git clone --depth 1 "$1" "$2"
           }
 
-          # FUNGSI SKIP JIKA SUDAH PERNAH DI-BUILD (Optimasi Enterprise)
-          build_lib() {
-            if [ -f "$BUILD_DIR/out_$2/lib/lib$2.a" ] || [ -d "$BUILD_DIR/out_$2" ]; then
-              echo "=== SKIPPING $1 (sudah ter-cache) ==="
-              return 0
-            fi
-            echo "=== BUILDING $1 ==="
-            cd $BUILD_DIR
-            # Kode build library asli kamu ada di sini...
-            # (Isi lengkap 16 library kamu tetap ditaruh di sini seperti kode sebelumnya)
+          autoreconf_build() {
+            local dir="$1"
+            local prefix="$2"
+
+            cd "$dir"
+
+            autoreconf -fi
+
+            ./configure \
+              --host="$HOST" \
+              --prefix="$prefix" \
+              --enable-static \
+              --disable-shared \
+              --disable-dependency-tracking \
+              CPPFLAGS="$CPPFLAGS" \
+              CFLAGS="$CFLAGS" \
+              LDFLAGS="$LDFLAGS"
+
+            make -j"$(nproc)"
+            make install
           }
 
-          # 1. zlib
-          git clone --depth 1 https://github.com/madler/zlib.git
+          cd "$SRC"
+
+          echo '=== zlib ==='
+          clone https://github.com/madler/zlib.git zlib
           cd zlib
-          CC="$CC" CFLAGS="$CFLAGS" ./configure --prefix=$BUILD_DIR/out_zlib --static
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_zlib
-          cd $BUILD_DIR
 
-          # 2. libogg
-          git clone --depth 1 https://github.com/xiph/ogg.git
-          cd ogg
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_ogg
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_ogg
-          cd $BUILD_DIR
+          CC="$CC" CFLAGS="$CFLAGS" ./configure \
+            --static \
+            --prefix="$PREFIX"
 
-          # 3. libflac
-          git clone --depth 1 https://github.com/xiph/flac.git
+          make -j"$(nproc)"
+          make install
+
+          cd "$SRC"
+
+          echo '=== libogg ==='
+          clone https://github.com/xiph/ogg.git ogg
+          autoreconf_build "$SRC/ogg" "$PREFIX"
+
+          echo '=== libflac ==='
+          clone https://github.com/xiph/flac.git flac
           cd flac
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_flac --with-ogg=$BUILD_DIR/out_ogg
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_flac
-          cd $BUILD_DIR
 
-          # 4. libpng
-          git clone --depth 1 https://github.com/pnggroup/libpng.git
-          cd libpng
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_png CPPFLAGS="-I$PREFIX_GPL/include" LDFLAGS="-L$PREFIX_GPL/lib"
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_png
-          cd $BUILD_DIR
-
-          # 5. libzimg
-          git clone --depth 1 https://github.com/sekrit-twc/zimg.git
-          cd zimg
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_zimg
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_zimg
-          cd $BUILD_DIR
-
-          # 6. x264 (Diperbaiki bagian assembler)
-          git clone --depth 1 https://code.videolan.org/videolan/x264.git
-          cd x264
-          AS="$CC" ./configure --host=aarch64-linux --enable-static --disable-cli --prefix=$BUILD_DIR/out_x264
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_x264
-          cd $BUILD_DIR
-
-          # 7. x265
-          git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git
-          cd x265_git/build/linux
-          cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=29 -DENABLE_SHARED=OFF -DCMAKE_INSTALL_PREFIX=$BUILD_DIR/out_x265 ../../source
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_x265
-          cd $BUILD_DIR
-
-          # 8. SVT-AV1
-          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
-          cd SVT-AV1/Build
-          cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=29 -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=$BUILD_DIR/out_svtav1 ..
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_svtav1
-          cd $BUILD_DIR
-
-          # 9. libaom
-          git clone --depth 1 https://aomedia.googlesource.com/aom
-          mkdir -p aom/build_dir && cd aom/build_dir
-          cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=29 -DBUILD_SHARED_LIBS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TESTS=OFF -DCMAKE_INSTALL_PREFIX=$BUILD_DIR/out_aom ..
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_aom
-          cd $BUILD_DIR
-
-          # 10. librav1e
-          git clone --depth 1 https://github.com/xiph/rav1e.git
-          cd rav1e
-          cargo ndk -t arm64-v8a -p 29 -- build --release --c-header
-          mkdir -p $BUILD_DIR/out_rav1e/lib $BUILD_DIR/out_rav1e/include
-          cp target/aarch64-linux-android/release/librav1e.a $BUILD_DIR/out_rav1e/lib/
-          cp target/aarch64-linux-android/release/rav1e.h $BUILD_DIR/out_rav1e/include/
-          install_libs $BUILD_DIR/out_rav1e
-          cd $BUILD_DIR
-
-          # 11. libvpx
-          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git
-          cd libvpx
-          CC="$CC" CXX="$CXX" ./configure --target=arm64-android-gcc --enable-static --disable-shared --disable-examples --disable-unit-tests --prefix=$BUILD_DIR/out_vpx
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_vpx
-          cd $BUILD_DIR
-
-          # 12. LAME MP3
-          git clone --depth 1 https://github.com/gypified/libmp3lame.git
-          cd libmp3lame
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_lame
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_lame
-          cd $BUILD_DIR
-
-          # 13. libopus
-          git clone --depth 1 https://github.com/xiph/opus.git
-          cd opus
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_opus
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_opus
-          cd $BUILD_DIR
-
-          # 14. libvorbis
-          git clone --depth 1 https://github.com/xiph/vorbis.git
-          cd vorbis
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_vorbis --with-ogg=$BUILD_DIR/out_ogg
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_vorbis
-          cd $BUILD_DIR
-
-          # 15. libwebp
-          git clone --depth 1 https://chromium.googlesource.com/webm/libwebp
-          cd libwebp
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$BUILD_DIR/out_webp
-          make -j$(nproc) && make install
-          install_libs $BUILD_DIR/out_webp
-          cd $BUILD_DIR
-
-          # 16. libfdk-aac (Khusus Non-Free)
-          git clone --depth 1 https://github.com/mstorsjo/fdk-aac
-          cd fdk-aac
-          ./autogen.sh
-          ./configure --host=aarch64-linux-android --enable-static --disable-shared --prefix=$PREFIX_NONFREE
-          make -j$(nproc) && make install
-          cd $BUILD_DIR
-
-      # -------------------------------------------------------------
-      # BUILD 1: FFmpeg Master - GPL Free
-      # -------------------------------------------------------------
-      - name: Compile FFmpeg Master - GPL Free
-        run: |
-          NDK_PATH="$ANDROID_NDK_HOME"
-          BUILD_DIR=$GITHUB_WORKSPACE/build_space
-          PREFIX_GPL=$GITHUB_WORKSPACE/dist/gpl
-
-          mkdir -p $BUILD_DIR/ffmpeg-gpl
-          cd $BUILD_DIR/ffmpeg-gpl
-          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git src
-          cd src
-
-          export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
-          export PKG_CONFIG_PATH=$PREFIX_GPL/lib/pkgconfig
+          autoreconf -fi
 
           ./configure \
-            --target-os=android \
-            --arch=aarch64 \
-            --cpu=armv8-a \
-            --enable-cross-compile \
-            --cc=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
-            --cxx=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
-            --ar=$TOOLCHAIN/bin/llvm-ar \
-            --ranlib=$TOOLCHAIN/bin/llvm-ranlib \
-            --strip=$TOOLCHAIN/bin/llvm-strip \
-            --prefix=$PREFIX_GPL \
-            --pkg-config=pkg-config \
-            --pkg-config-flags="--static" \
-            --extra-cflags="-I$PREFIX_GPL/include -O3 -ftree-vectorize -march=armv8-a+simd" \
-            --extra-ldflags="-L$PREFIX_GPL/lib -Wl,--gc-sections" \
-            --enable-neon \
-            --enable-asm \
-            --enable-inline-asm \
-            --enable-optimizations \
+            --host="$HOST" \
+            --prefix="$PREFIX" \
             --enable-static \
             --disable-shared \
-            --enable-gpl \
-            --disable-nonfree \
-            --enable-mediacodec \
-            --enable-jni \
-            --enable-libx264 \
-            --enable-libx265 \
-            --enable-libsvtav1 \
-            --enable-libaom \
-            --enable-librav1e \
-            --enable-libvpx \
-            --enable-libmp3lame \
-            --enable-libopus \
-            --enable-libvorbis \
-            --enable-libflac \
-            --enable-libwebp \
-            --enable-libzimg \
-            --disable-doc \
             --disable-programs \
-            --enable-ffmpeg
+            --disable-dependency-tracking \
+            --with-ogg="$PREFIX" \
+            CPPFLAGS="$CPPFLAGS" \
+            CFLAGS="$CFLAGS" \
+            LDFLAGS="$LDFLAGS"
 
-          make -j$(nproc)
-          mv ffmpeg $GITHUB_WORKSPACE/ffmpeg-android-gpl
+          make -j"$(nproc)"
+          make install
 
-      # -------------------------------------------------------------
-      # BUILD 2: FFmpeg Master - NonFree (Dengan libfdk-aac)
-      # -------------------------------------------------------------
-      - name: Compile FFmpeg Master - NonFree
+          cd "$SRC"
+
+          echo '=== libpng (NEON) ==='
+          clone https://github.com/pnggroup/libpng.git libpng
+          cd libpng
+
+          autoreconf -fi
+
+          ./configure \
+            --host="$HOST" \
+            --prefix="$PREFIX" \
+            --enable-static \
+            --disable-shared \
+            --enable-arm-neon=on \
+            CPPFLAGS="$CPPFLAGS" \
+            CFLAGS="$CFLAGS" \
+            LDFLAGS="$LDFLAGS"
+
+          make -j"$(nproc)"
+          make install
+
+          cd "$SRC"
+
+          echo '=== zimg ==='
+          clone https://github.com/sekrit-twc/zimg.git zimg
+          autoreconf_build "$SRC/zimg" "$PREFIX"
+
+          echo '=== x264 ==='
+          clone https://code.videolan.org/videolan/x264.git x264
+          cd x264
+
+          ./configure \
+            --host="$HOST" \
+            --cross-prefix="$TOOLCHAIN/bin/aarch64-linux-android-" \
+            --sysroot="$SYSROOT" \
+            --prefix="$PREFIX" \
+            --enable-static \
+            --disable-shared \
+            --disable-cli \
+            --enable-pic
+
+          make -j"$(nproc)"
+          make install
+
+          cd "$SRC"
+
+          echo '=== x265 ==='
+          clone https://bitbucket.org/multicoreware/x265_git.git x265
+
+          cmake -S x265/source -B x265/build \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_CLI=OFF \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX"
+
+          cmake --build x265/build --parallel "$(nproc)"
+          cmake --install x265/build
+
+          echo '=== SVT-AV1 ==='
+          clone https://gitlab.com/AOMediaCodec/SVT-AV1.git svt-av1
+
+          cmake -S svt-av1 -B svt-av1/build \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_APPS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX"
+
+          cmake --build svt-av1/build --parallel "$(nproc)"
+          cmake --install svt-av1/build
+
+          echo '=== libaom ==='
+          clone https://aomedia.googlesource.com/aom aom
+
+          cmake -S aom -B aom/build \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_TOOLS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX"
+
+          cmake --build aom/build --parallel "$(nproc)"
+          cmake --install aom/build
+
+          echo '=== libvpx ==='
+          clone https://chromium.googlesource.com/webm/libvpx.git libvpx
+          cd libvpx
+
+          ./configure \
+            --target=arm64-android-gcc \
+            --prefix="$PREFIX" \
+            --enable-static \
+            --disable-shared \
+            --disable-examples \
+            --disable-tools \
+            --disable-unit-tests \
+            --enable-pic
+
+          make -j"$(nproc)"
+          make install
+
+          cd "$SRC"
+
+          echo '=== lame ==='
+          clone https://github.com/lameproject/lame.git lame
+          autoreconf_build "$SRC/lame" "$PREFIX"
+
+          echo '=== opus ==='
+          clone https://github.com/xiph/opus.git opus
+          autoreconf_build "$SRC/opus" "$PREFIX"
+
+          echo '=== vorbis ==='
+          clone https://github.com/xiph/vorbis.git vorbis
+          cd vorbis
+
+          autoreconf -fi
+
+          ./configure \
+            --host="$HOST" \
+            --prefix="$PREFIX" \
+            --enable-static \
+            --disable-shared \
+            --disable-dependency-tracking \
+            --with-ogg="$PREFIX" \
+            CPPFLAGS="$CPPFLAGS" \
+            CFLAGS="$CFLAGS" \
+            LDFLAGS="$LDFLAGS"
+
+          make -j"$(nproc)"
+          make install
+
+          cd "$SRC"
+
+          echo '=== webp ==='
+          clone https://chromium.googlesource.com/webm/libwebp.git libwebp
+          autoreconf_build "$SRC/libwebp" "$PREFIX"
+
+          echo '=== dav1d (AV1 decoder, ARM64 asm/NEON) ==='
+          clone https://code.videolan.org/videolan/dav1d.git dav1d
+
+          meson setup dav1d/build dav1d \
+            --cross-file=dav1d/package/crossfiles/aarch64-android.meson \
+            --default-library=static \
+            --buildtype=release \
+            --prefix="$PREFIX" \
+            --libdir=lib \
+            -Denable_tools=false \
+            -Denable_tests=false
+
+          meson compile -C dav1d/build -j "$(nproc)"
+          meson install -C dav1d/build
+
+          echo '=== rav1e (AV1 encoder C API, ARM64 asm/NEON) ==='
+          clone https://github.com/xiph/rav1e.git rav1e
+          cd rav1e
+
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC"
+          export CC_aarch64_linux_android="$CC"
+          export CXX_aarch64_linux_android="$CXX"
+          export AR_aarch64_linux_android="$AR"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C target-feature=+neon -C target-cpu=generic"
+
+          cargo cinstall \
+            --release \
+            --target aarch64-linux-android \
+            --prefix "$PREFIX" \
+            --library-type staticlib \
+            --locked
+
+          cd "$SRC"
+
+          echo '=== fdk-aac (nonfree) ==='
+          clone https://github.com/mstorsjo/fdk-aac.git fdk-aac
+          cd fdk-aac
+
+          autoreconf -fi
+
+          ./configure \
+            --host="$HOST" \
+            --prefix="$PREFIX" \
+            --enable-static \
+            --disable-shared \
+            --disable-dependency-tracking \
+            CPPFLAGS="$CPPFLAGS" \
+            CFLAGS="$CFLAGS" \
+            LDFLAGS="$LDFLAGS"
+
+          make -j"$(nproc)"
+          make install
+
+          cd "$SRC"
+
+          echo '=== verify pkg-config libraries ==='
+
+          pkg-config --modversion x264
+          pkg-config --modversion x265 || true
+          pkg-config --modversion libaom
+          pkg-config --modversion SvtAv1Enc
+          pkg-config --modversion vpx
+          pkg-config --modversion opus
+          pkg-config --modversion vorbis
+          pkg-config --modversion flac
+          pkg-config --modversion dav1d
+          pkg-config --modversion rav1e
+          pkg-config --modversion fdk-aac
+
+          test -f "$PREFIX/include/png.h"
+          test -f "$PREFIX/lib/libpng16.a"
+          test -f "$PREFIX/lib/libdav1d.a"
+          test -f "$PREFIX/lib/librav1e.a"
+
+          echo '=== PREFIX ==='
+          find "$PREFIX" -maxdepth 2 -type f | sort | head -200
+
+      - name: Build FFmpeg master
+        shell: bash
         run: |
-          NDK_PATH="$ANDROID_NDK_HOME"
-          BUILD_DIR=$GITHUB_WORKSPACE/build_space
-          PREFIX_NONFREE=$GITHUB_WORKSPACE/dist/nonfree
+          set -euxo pipefail
 
-          mkdir -p $BUILD_DIR/ffmpeg-nonfree
-          cd $BUILD_DIR/ffmpeg-nonfree
-          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git src
-          cd src
+          ROOT="$GITHUB_WORKSPACE"
+          PREFIX="$ROOT/build_space/prefix"
+          NDK="$ANDROID_NDK_HOME"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
-          export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
-          export PKG_CONFIG_PATH=$PREFIX_NONFREE/lib/pkgconfig
+          export PATH="$TOOLCHAIN/bin:$PREFIX/bin:$HOME/.cargo/bin:$PATH"
+
+          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+
+          export CC="$TOOLCHAIN/bin/aarch64-linux-android29-clang"
+          export CXX="$TOOLCHAIN/bin/aarch64-linux-android29-clang++"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/bin/llvm-strip"
+          export NM="$TOOLCHAIN/bin/llvm-nm"
+
+          cd "$ROOT/build_space"
+
+          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git ffmpeg
+          cd ffmpeg
 
           ./configure \
             --target-os=android \
             --arch=aarch64 \
             --cpu=armv8-a \
             --enable-cross-compile \
-            --cc=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
-            --cxx=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
-            --ar=$TOOLCHAIN/bin/llvm-ar \
-            --ranlib=$TOOLCHAIN/bin/llvm-ranlib \
-            --strip=$TOOLCHAIN/bin/llvm-strip \
-            --prefix=$PREFIX_NONFREE \
+            --sysroot="$TOOLCHAIN/sysroot" \
+            --cc="$CC" \
+            --cxx="$CXX" \
+            --ar="$AR" \
+            --ranlib="$RANLIB" \
+            --strip="$STRIP" \
+            --nm="$NM" \
             --pkg-config=pkg-config \
-            --pkg-config-flags="--static" \
-            --extra-cflags="-I$PREFIX_NONFREE/include -O3 -ftree-vectorize -march=armv8-a+simd" \
-            --extra-ldflags="-L$PREFIX_NONFREE/lib -Wl,--gc-sections" \
+            --pkg-config-flags=--static \
+            --prefix="$ROOT/out/ffmpeg-android-arm64" \
+            --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd -D__ANDROID_API__=29" \
+            --extra-ldflags="-L$PREFIX/lib -Wl,--gc-sections" \
+            --extra-libs="-lm -ldl" \
             --enable-neon \
             --enable-asm \
             --enable-inline-asm \
-            --enable-optimizations \
+            --enable-pic \
+            --enable-pthreads \
             --enable-static \
             --disable-shared \
             --enable-gpl \
             --enable-nonfree \
-            --enable-libfdk-aac \
             --enable-mediacodec \
             --enable-jni \
+            --enable-zlib \
+            --enable-libpng \
             --enable-libx264 \
             --enable-libx265 \
             --enable-libsvtav1 \
             --enable-libaom \
-            --enable-librav1e \
             --enable-libvpx \
+            --enable-librav1e \
+            --enable-libdav1d \
             --enable-libmp3lame \
             --enable-libopus \
             --enable-libvorbis \
             --enable-libflac \
             --enable-libwebp \
             --enable-libzimg \
+            --enable-libfdk-aac \
             --disable-doc \
-            --disable-programs \
-            --enable-ffmpeg
+            --disable-debug
 
-          make -j$(nproc)
-          mv ffmpeg $GITHUB_WORKSPACE/ffmpeg-android-nonfree
+          make -j"$(nproc)"
+          make install
 
-      - name: Upload Artifacts
+          "$ROOT/out/ffmpeg-android-arm64/bin/ffmpeg" -version
+          "$ROOT/out/ffmpeg-android-arm64/bin/ffmpeg" -buildconf
+
+          file "$ROOT/out/ffmpeg-android-arm64/bin/ffmpeg"
+
+          "$ROOT/out/ffmpeg-android-arm64/bin/ffmpeg" \
+            -hide_banner -encoders |
+            grep -E 'libx264|libx265|libsvtav1|libaom|librav1e|png|libvpx|libopus|libvorbis|libfdk' || true
+
+          "$ROOT/out/ffmpeg-android-arm64/bin/ffmpeg" \
+            -hide_banner -decoders |
+            grep -E 'libdav1d|libvpx|libopus|libvorbis|png' || true
+
+          "$ROOT/out/ffmpeg-android-arm64/bin/ffmpeg" \
+            -hide_banner -formats >/dev/null
+
+      - name: Package artifact
+        run: |
+          cd "$GITHUB_WORKSPACE/out"
+          tar -czf ffmpeg-android-arm64-complete.tar.gz ffmpeg-android-arm64
+          sha256sum ffmpeg-android-arm64-complete.tar.gz
+
+      - name: Upload FFmpeg Android ARM64
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-master-complete
-          path: |
-            ffmpeg-android-gpl
-            ffmpeg-android-nonfree
+          name: ffmpeg-android-arm64-complete
+          path: ${{ github.workspace }}/out/ffmpeg-android-arm64-complete.tar.gz
+          if-no-files-found: error
+```
