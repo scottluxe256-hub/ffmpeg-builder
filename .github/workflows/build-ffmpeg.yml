@@ -167,6 +167,7 @@ jobs:
 
           STDLIB_PATH="$SYSROOT/usr/lib/aarch64-linux-android"
 
+          # Trik Utama: Matikan stdlib otomatis Clang dengan -nostdlib++
           FLAGS=(
             --target-os=android
             --arch=aarch64
@@ -180,7 +181,7 @@ jobs:
             --pkg-config-flags="--static"
             --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
             --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
-            --extra-ldflags="-L$PREFIX/lib -static-libstdc++"
+            --extra-ldflags="-L$PREFIX/lib -nostdlib++"
             --extra-libs="$STDLIB_PATH/libc++_static.a $STDLIB_PATH/libc++abi.a -lm -ldl -lz -llog -landroid -pthread"
             --enable-static
             --disable-shared
@@ -211,7 +212,7 @@ jobs:
 
           make -j$(nproc)
           
-          # Strip debug symbols biar ukuran file ramping
+          # Strip debug symbols
           "$STRIP_TOOL" --strip-all ffmpeg
 
           mkdir -p "$ROOT/dist"
@@ -221,7 +222,7 @@ jobs:
           cd "$ROOT/dist"
           zip -9 ffmpeg-nonfree-arm64-build-${{ github.run_number }}.zip ffmpeg-nonfree
 
-          # Pack 14 Static Libraries + Headers (buat cadangan build GPL nanti tanpa kompilasi ulang)
+          # Pack 14 Static Libraries + Headers
           cd "$PREFIX"
           zip -9 -r "$ROOT/dist/14-static-libs-android-arm64.zip" include lib
 
