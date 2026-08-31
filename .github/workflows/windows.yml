@@ -64,16 +64,18 @@ jobs:
           ./configure --host="$HOST" --cross-prefix=$HOST- --prefix="$PREFIX" --enable-static --disable-cli
           make -j$(nproc) && make install
 
-          # 4. x265 (Solusi Cadangan jika versi git masih error)
-          clone https://github.com/videolan/x265.git "$SRC/x265"
+          # 4. x265 (Full Clone tanpa --depth 1 agar CMake membaca Git tag/version dengan benar)
+          git clone https://github.com/videolan/x265.git "$SRC/x265"
           cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
             -DCMAKE_SYSTEM_NAME=Windows \
             -DCMAKE_C_COMPILER=$HOST-gcc \
             -DCMAKE_CXX_COMPILER=$HOST-g++ \
             -DCMAKE_RC_COMPILER=$HOST-windres \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
-            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON \
-            -DX265_LATEST_TAG="3.5"
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_CLI=OFF \
+            -DEXPORT_C_API=ON
           ninja -C "$SRC/x265/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lstdc++ -lgcc -lwinmm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
           
