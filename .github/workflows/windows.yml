@@ -147,6 +147,11 @@ jobs:
           cd "$SRC/fdk-aac" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
+          # 13. nv-codec-headers (Wajib untuk NVIDIA NVENC/NVDEC)
+          clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git "$SRC/nv-codec-headers"
+          cd "$SRC/nv-codec-headers"
+          make PREFIX="$PREFIX" install
+          
       # --- FFMPEG ---
 
       - name: Build FFmpeg
