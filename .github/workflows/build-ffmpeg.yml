@@ -1,4 +1,4 @@
-name: Build FFmpeg Static Android ARM64
+Name: Build FFmpeg Static Android ARM64
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo cmake ninja-build wget unzip python3 meson zip binutils
+            git yasm nasm texinfo cmake ninja-build wget unzip python3 binutils
 
       - name: Setup Environment & Android NDK r26b
         run: |
@@ -30,7 +30,7 @@ jobs:
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
 
-          # Wrapper symlink untuk autotools & configure FFmpeg
+          # Wrapper symlink sesuai struktur lama yang terbukti sukses
           mkdir -p $GITHUB_WORKSPACE/bin_wrapper
           cd $GITHUB_WORKSPACE/bin_wrapper
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar aarch64-linux-android-ar
@@ -42,9 +42,9 @@ jobs:
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings aarch64-linux-android-strings
           echo "$GITHUB_WORKSPACE/bin_wrapper" >> $GITHUB_PATH
 
-      # --- BUILD 14 LIBRARIES ---
+      # --- BUILD LIBRARIES ---
 
-      - name: Build 14 External Libraries
+      - name: Build External Libraries
         run: |
           set -euxo pipefail
           SRC="$GITHUB_WORKSPACE/build_sources"
@@ -71,24 +71,13 @@ jobs:
           ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-          # 3. libpng
-          clone https://github.com/pnggroup/libpng.git "$SRC/libpng"
-          cd "$SRC/libpng" && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(nproc) && make install
-
-          # 4. zimg
-          clone https://github.com/sekrit-twc/zimg.git "$SRC/zimg"
-          cd "$SRC/zimg" && git submodule update --init --recursive && ./autogen.sh
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(nproc) && make install
-
-          # 5. x264
+          # 3. x264
           clone https://code.videolan.org/videolan/x264.git "$SRC/x264"
           cd "$SRC/x264"
           ./configure --host="$HOST" --cross-prefix=aarch64-linux-android- --prefix="$PREFIX" --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
           make -j$(nproc) && make install
 
-          # 6. x265
+          # 4. x265
           clone https://github.com/videolan/x265.git "$SRC/x265"
           cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
@@ -98,7 +87,7 @@ jobs:
           ninja -C "$SRC/x265/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
-          # 7. SVT-AV1
+          # 5. SVT-AV1
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
@@ -107,7 +96,7 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           ninja -C "$SRC/SVT-AV1/build" install
 
-          # 8. libaom
+          # 6. libaom
           clone https://aomedia.googlesource.com/aom "$SRC/aom"
           cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
@@ -117,34 +106,34 @@ jobs:
           ninja -C "$SRC/aom/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
-          # 9. libvpx
+          # 7. libvpx
           clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
           mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
           ../libvpx/configure --target=arm64-android-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
           make -j$(nproc) && make install
 
-          # 10. mp3lame
+          # 8. mp3lame
           clone https://github.com/lameproject/lame.git "$SRC/lame"
           cd "$SRC/lame" && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
           make -j$(nproc) && make install
 
-          # 11. opus
+          # 9. opus
           clone https://github.com/xiph/opus.git "$SRC/opus"
           cd "$SRC/opus" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-          # 12. vorbis
+          # 10. vorbis
           clone https://github.com/xiph/vorbis.git "$SRC/vorbis"
           cd "$SRC/vorbis" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
           make -j$(nproc) && make install
 
-          # 13. webp
+          # 11. libwebp (Hanya lib foto ini yang dipakai)
           clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
           cd "$SRC/libwebp" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
 
-          # 14. fdk-aac
+          # 12. fdk-aac
           clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
           cd "$SRC/fdk-aac" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
@@ -176,7 +165,7 @@ jobs:
             --enable-asm --enable-neon \
             --enable-gpl --enable-nonfree \
             --enable-jni --enable-mediacodec \
-            --enable-libzimg --enable-libx264 --enable-libx265 --enable-libsvtav1 \
+            --enable-libx264 --enable-libx265 --enable-libsvtav1 \
             --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
             --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
@@ -194,5 +183,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-aarch64-14libs-static
+          name: ffmpeg-android-aarch64-static
           path: ffmpeg_source/ffmpeg
