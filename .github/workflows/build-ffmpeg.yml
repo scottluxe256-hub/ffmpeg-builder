@@ -61,6 +61,7 @@ jobs:
             cmake -S "$1" -B "$2" -G Ninja \
               -DCMAKE_TOOLCHAIN_FILE="$NDK_PATH/build/cmake/android.toolchain.cmake" \
               -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-${API} \
+              -DANDROID_STL=c++_static \
               -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
               -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib "${@:3}"
           }
@@ -83,7 +84,7 @@ jobs:
           # 4. zimg
           clone https://github.com/sekrit-twc/zimg.git "$SRC/zimg"
           cd "$SRC/zimg" && git submodule update --init --recursive && ./autogen.sh
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared LDFLAGS="$LDFLAGS"
           make -j$(nproc) && make install
 
           # 5. x264
@@ -121,7 +122,7 @@ jobs:
           # 10. mp3lame
           clone https://github.com/lameproject/lame.git "$SRC/lame"
           cd "$SRC/lame"
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend LDFLAGS="$LDFLAGS"
           make -j$(nproc) && make install
 
           # 11. opus
@@ -132,7 +133,7 @@ jobs:
           # 12. vorbis
           clone https://github.com/xiph/vorbis.git "$SRC/vorbis"
           cd "$SRC/vorbis" && ./autogen.sh
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg" LDFLAGS="$LDFLAGS"
           make -j$(nproc) && make install
 
           # 13. webp
@@ -144,7 +145,7 @@ jobs:
           # 14. fdk-aac
           clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
           cd "$SRC/fdk-aac" && ./autogen.sh
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared LDFLAGS="$LDFLAGS"
           make -j$(nproc) && make install
 
       - name: Build FFmpeg Binaries (v9.0.1)
@@ -162,20 +163,20 @@ jobs:
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
-           FLAGS=(
+          FLAGS=(
             --target-os=android
             --arch=aarch64
             --cpu=armv8-a
             --enable-cross-compile
-            --cc="$TOOLCHAIN/bin/aarch64-linux-android29-clang"
-            --cxx="$TOOLCHAIN/bin/aarch64-linux-android29-clang++"
+            --cc="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang"
+            --cxx="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++"
             --ar="$TOOLCHAIN/bin/llvm-ar"
             --strip="$TOOLCHAIN/bin/llvm-strip"
             --pkg-config=pkg-config
             --pkg-config-flags="--static"
             --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
             --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
-            --extra-ldflags="-L$PREFIX/lib -static-libstdc++ -Wl,-Bstatic -lc++_static -lc++abi -Wl,-Bdynamic"
+            --extra-ldflags="-L$PREFIX/lib -static-libstdc++ -Wl,-Bstatic -lc++_static -lc++abi"
             --extra-libs="-lm -ldl -lz -llog -landroid -pthread"
             --enable-static
             --disable-shared
@@ -239,3 +240,4 @@ jobs:
         with:
           name: ffmpeg-binaries-zip
           path: ${{ github.workspace }}/dist/ffmpeg-android-arm64-binaries.zip
+          
