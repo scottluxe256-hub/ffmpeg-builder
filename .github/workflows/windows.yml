@@ -27,7 +27,7 @@ jobs:
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
 
-      # --- BUILD LIBRARIES ---
+      # --- BUILD EXTERNAL LIBRARIES ---
 
       - name: Build External Libraries
         run: |
@@ -47,24 +47,34 @@ jobs:
 
           clone() { git clone --depth 1 "$1" "$2"; }
 
-          # 1. zlib (Aman untuk Windows)
+          # 1. NVIDIA Codec Headers
+          clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git "$SRC/nv-codec-headers"
+          cd "$SRC/nv-codec-headers"
+          make PREFIX="$PREFIX" install
+
+          # 2. AMD AMF Headers
+          clone https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git "$SRC/AMF"
+          mkdir -p "$PREFIX/include/AMF"
+          cp -r "$SRC/AMF/amf/public/include/"* "$PREFIX/include/AMF/"
+
+          # 3. zlib
           clone https://github.com/madler/zlib.git "$SRC/zlib"
           cd "$SRC/zlib"
           make -f win32/Makefile.gcc PREFIX=$HOST- BINARY_PATH=$PREFIX/bin INCLUDE_PATH=$PREFIX/include LIBRARY_PATH=$PREFIX/lib install
 
-          # 2. ogg
+          # 4. ogg
           clone https://github.com/xiph/ogg.git "$SRC/ogg"
           cd "$SRC/ogg" && ./autogen.sh
           ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-          # 3. x264
+          # 5. x264
           clone https://code.videolan.org/videolan/x264.git "$SRC/x264"
           cd "$SRC/x264"
           ./configure --host="$HOST" --cross-prefix=$HOST- --prefix="$PREFIX" --enable-static --disable-cli
           make -j$(nproc) && make install
 
-          # 4. x265 (Full clone & Fix Git Version Error)
+          # 6. x265 (Full clone untuk git-version tag)
           git clone https://github.com/videolan/x265.git "$SRC/x265"
           cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
             -DCMAKE_SYSTEM_NAME=Windows \
@@ -77,7 +87,7 @@ jobs:
           ninja -C "$SRC/x265/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lstdc++ -lgcc -lwinmm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
-          # 5. SVT-AV1
+          # 7. SVT-AV1
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
             -DCMAKE_SYSTEM_NAME=Windows \
@@ -88,7 +98,7 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           ninja -C "$SRC/SVT-AV1/build" install
 
-          # 6. libaom
+          # 8. libaom
           clone https://aomedia.googlesource.com/aom "$SRC/aom"
           cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
             -DCMAKE_SYSTEM_NAME=Windows \
@@ -100,59 +110,45 @@ jobs:
           ninja -C "$SRC/aom/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lstdc++ -lgcc\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
-          # 7. libvpx (Build via ./configure bawaan vpx)
+          # 9. libvpx
           clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
           mkdir -p "$SRC/libvpx-build" && cd "$SRC/libvpx-build"
           ../libvpx/configure \
             --target=x86_64-win64-gcc \
             --prefix="$PREFIX" \
             --libdir="$PREFIX/lib" \
-            --as=nasm \
-            --disable-shared \
-            --enable-static \
-            --disable-examples \
-            --disable-unit-tests \
-            --enable-vp8 \
-            --enable-vp9 \
-            --enable-postproc \
-            --enable-vp9-postproc \
-            --enable-multithread \
-            --enable-pic
-          make -j$(nproc)
-          make install
+            --as=nasm --disable-shared --enable-static \
+            --disable-examples --disable-unit-tests \
+            --enable-vp8 --enable-vp9 --enable-postproc --enable-vp9-postproc --enable-multithread --enable-pic
+          make -j$(nproc) && make install
 
-          # 8. mp3lame
+          # 10. mp3lame
           clone https://github.com/lameproject/lame.git "$SRC/lame"
           cd "$SRC/lame" && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
           make -j$(nproc) && make install
 
-          # 9. opus
+          # 11. opus
           clone https://github.com/xiph/opus.git "$SRC/opus"
           cd "$SRC/opus" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-          # 10. vorbis
+          # 12. vorbis
           clone https://github.com/xiph/vorbis.git "$SRC/vorbis"
           cd "$SRC/vorbis" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
           make -j$(nproc) && make install
 
-          # 11. libwebp
+          # 13. libwebp
           clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
           cd "$SRC/libwebp" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lstdc++ -lgcc\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
 
-          # 12. fdk-aac
+          # 14. fdk-aac
           clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
           cd "$SRC/fdk-aac" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-          # 13. nv-codec-headers (Wajib untuk NVIDIA NVENC/NVDEC)
-          clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git "$SRC/nv-codec-headers"
-          cd "$SRC/nv-codec-headers"
-          make PREFIX="$PREFIX" install
-          
-      # --- FFMPEG ---
+      # --- BUILD FFMPEG ---
 
       - name: Build FFmpeg
         run: |
@@ -166,7 +162,7 @@ jobs:
             --target-os=mingw32 --arch=x86_64 --cpu=sandybridge --enable-cross-compile \
             --cross-prefix=x86_64-w64-mingw32- \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
-            --extra-cflags="-I$INSTALL_DIR/include" \
+            --extra-cflags="-I$INSTALL_DIR/include -D_CRT_SECURE_NO_WARNINGS" \
             --extra-cxxflags="-I$INSTALL_DIR/include" \
             --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64 -static -static-libgcc -static-libstdc++" \
             --extra-libs="-lpthread -lwinmm -lws2_32 -lole32 -luuid" \
