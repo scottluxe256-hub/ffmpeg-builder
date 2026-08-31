@@ -239,4 +239,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-binaries-zip
-          path: ${{ github.workspace }}/dist/ffmpeg-android-arm64-binaries.zip
+          path: ${{ github.workspace }}/dist/*
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v9.0.1-build-${{ github.run_number }}
+          name: FFmpeg Standalone v9.0.1 (Build #${{ github.run_number }})
+          files: ${{ github.workspace }}/dist/ffmpeg-android-arm64-binaries.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
