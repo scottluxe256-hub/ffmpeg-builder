@@ -162,9 +162,8 @@ jobs:
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
-          # Cari lokasi fisik pasti libc++_static.a & libc++abi.a di NDK
-          STDLIB_STATIC=$(find "$NDK_PATH" -name "libc++_static.a" | head -n 1)
-          STDLIB_ABI=$(find "$NDK_PATH" -name "libc++abi.a" | head -n 1)
+          # KUNCI ABSOLUT: Tunjuk langsung folder aarch64-linux-android
+          STDLIB_DIR="$TOOLCHAIN/sysroot/usr/lib/aarch64-linux-android"
 
           FLAGS=(
             --target-os=android
@@ -180,8 +179,8 @@ jobs:
             --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
             --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
             --extra-ldflags="-L$PREFIX/lib"
-            # Suntikkan langsung archive statis ke dalam linking FFmpeg
-            --extra-libs="$STDLIB_STATIC $STDLIB_ABI -lm -ldl -lz -llog -landroid -pthread"
+            # Tunjuk langsung file fisik aarch64 tanpa libc++_shared
+            --extra-libs="$STDLIB_DIR/libc++_static.a $STDLIB_DIR/libc++abi.a -lm -ldl -lz -llog -landroid -pthread"
             --enable-static
             --disable-shared
             --disable-doc
