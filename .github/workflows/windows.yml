@@ -1,4 +1,4 @@
-Name: Build FFmpeg Static Windows x64
+name: Build FFmpeg Static Windows x64
 
 on:
   workflow_dispatch:
