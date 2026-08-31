@@ -151,10 +151,14 @@ jobs:
             --extra-cflags="-I$INSTALL_DIR/include" \
             --extra-cxxflags="-I$INSTALL_DIR/include" \
             --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64 -static -static-libgcc -static-libstdc++" \
-            --extra-libs="-lptw32 -lwinmm -lws2_32" \
+            --extra-libs="-lpthread -lwinmm -lws2_32 -lole32 -luuid" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
+            --enable-x86asm --enable-inline-asm \
             --enable-gpl --enable-nonfree \
+            --enable-dxva2 --enable-d3d11va \
+            --enable-nvenc --enable-nvdec \
+            --enable-amf \
             --enable-libx264 --enable-libx265 --enable-libsvtav1 \
             --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
             --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
