@@ -176,8 +176,8 @@ jobs:
             --pkg-config-flags="--static"
             --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
             --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
-            --extra-ldflags="-L$PREFIX/lib -static-libstdc++ -Wl,-Bstatic -lc++_static -lc++abi"
-            --extra-libs="-lm -ldl -lz -llog -landroid -pthread"
+            --extra-ldflags="-L$PREFIX/lib -static-libstdc++"
+            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread"
             --enable-static
             --disable-shared
             --disable-doc
@@ -240,4 +240,3 @@ jobs:
         with:
           name: ffmpeg-binaries-zip
           path: ${{ github.workspace }}/dist/ffmpeg-android-arm64-binaries.zip
-          
