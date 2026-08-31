@@ -36,7 +36,7 @@ jobs:
           PREFIX="$INSTALL_DIR"
           HOST="x86_64-w64-mingw32"
 
-          mkdir -p "$SRC" "$PREFIX/lib/pkgconfig"
+          mkdir -p "$SRC" "$PREFIX/lib/pkgconfig" "$PREFIX/include"
 
           export CC=$HOST-gcc
           export CXX=$HOST-g++
@@ -47,7 +47,7 @@ jobs:
 
           clone() { git clone --depth 1 "$1" "$2"; }
 
-          # 1. zlib
+          # 1. zlib (Aman untuk Windows)
           clone https://github.com/madler/zlib.git "$SRC/zlib"
           cd "$SRC/zlib"
           make -f win32/Makefile.gcc PREFIX=$HOST- BINARY_PATH=$PREFIX/bin INCLUDE_PATH=$PREFIX/include LIBRARY_PATH=$PREFIX/lib install
@@ -64,7 +64,7 @@ jobs:
           ./configure --host="$HOST" --cross-prefix=$HOST- --prefix="$PREFIX" --enable-static --disable-cli
           make -j$(nproc) && make install
 
-          # 4. x265 (Full Clone tanpa --depth 1 agar CMake membaca Git tag/version dengan benar)
+          # 4. x265 (Full clone & Fix Git Version Error)
           git clone https://github.com/videolan/x265.git "$SRC/x265"
           cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
             -DCMAKE_SYSTEM_NAME=Windows \
@@ -73,12 +73,10 @@ jobs:
             -DCMAKE_RC_COMPILER=$HOST-windres \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_INSTALL_LIBDIR=lib \
-            -DENABLE_SHARED=OFF \
-            -DENABLE_CLI=OFF \
-            -DEXPORT_C_API=ON
+            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON
           ninja -C "$SRC/x265/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lstdc++ -lgcc -lwinmm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
-          
+
           # 5. SVT-AV1
           clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
@@ -102,11 +100,17 @@ jobs:
           ninja -C "$SRC/aom/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lstdc++ -lgcc\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
-          # 7. libvpx
+          # 7. libvpx (Fix Header via CMake)
           clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
-          mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
-          ../libvpx/configure --target=x86_64-win64-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples
-          make -j$(nproc) && make install
+          cmake -G "Ninja" -S "$SRC/libvpx" -B "$SRC/libvpx/build" \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=$HOST-gcc \
+            -DCMAKE_CXX_COMPILER=$HOST-g++ \
+            -DCMAKE_RC_COMPILER=$HOST-windres \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF -DCONFIG_EXAMPLES=OFF -DCONFIG_UNIT_TESTS=OFF
+          ninja -C "$SRC/libvpx/build" install
 
           # 8. mp3lame
           clone https://github.com/lameproject/lame.git "$SRC/lame"
