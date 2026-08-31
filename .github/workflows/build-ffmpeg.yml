@@ -49,10 +49,11 @@ jobs:
           export STRIP="$TOOLCHAIN/bin/llvm-strip"
           export AS="$CC"
 
-          # KUNCI UTAMA 1: Paksa semua C++ library pakai static STL sejak awal
+          # Kembalikan LDFLAGS bersih untuk mencegah error configure pada C library seperti libvpx
           export CFLAGS="-O3 -fPIC -march=armv8-a+simd+crypto -ftree-vectorize"
-          export CXXFLAGS="$CFLAGS -static-libstdc++"
-          export LDFLAGS="-L$PREFIX/lib -static-libstdc++"
+          export CXXFLAGS="$CFLAGS"
+          export CPPFLAGS="-I$PREFIX/include"
+          export LDFLAGS="-L$PREFIX/lib"
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
@@ -161,6 +162,10 @@ jobs:
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
+          # Cari lokasi fisik pasti libc++_static.a & libc++abi.a di NDK
+          STDLIB_STATIC=$(find "$NDK_PATH" -name "libc++_static.a" | head -n 1)
+          STDLIB_ABI=$(find "$NDK_PATH" -name "libc++abi.a" | head -n 1)
+
           FLAGS=(
             --target-os=android
             --arch=aarch64
@@ -168,17 +173,15 @@ jobs:
             --enable-cross-compile
             --cc="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang"
             --cxx="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++"
-            # KUNCI UTAMA 2: Paksa FFmpeg pakai compiler C++ buat linking akhir
-            --ld="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++"
             --ar="$TOOLCHAIN/bin/llvm-ar"
             --strip="$STRIP_TOOL"
             --pkg-config=pkg-config
             --pkg-config-flags="--static"
             --extra-cflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
-            --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto -static-libstdc++"
-            # Flag static-libstdc++ ke linker
-            --extra-ldflags="-L$PREFIX/lib -static-libstdc++"
-            --extra-libs="-lm -ldl -lz -llog -landroid -pthread"
+            --extra-cxxflags="-I$PREFIX/include -O3 -fPIC -march=armv8-a+simd+crypto"
+            --extra-ldflags="-L$PREFIX/lib"
+            # Suntikkan langsung archive statis ke dalam linking FFmpeg
+            --extra-libs="$STDLIB_STATIC $STDLIB_ABI -lm -ldl -lz -llog -landroid -pthread"
             --enable-static
             --disable-shared
             --disable-doc
@@ -208,7 +211,7 @@ jobs:
 
           make -j$(nproc)
           
-          # Strip debug symbols biar ringan
+          # Strip debug symbols
           "$STRIP_TOOL" --strip-all ffmpeg
 
           mkdir -p "$ROOT/dist"
@@ -218,7 +221,7 @@ jobs:
           cd "$ROOT/dist"
           zip -9 ffmpeg-nonfree-arm64-build-${{ github.run_number }}.zip ffmpeg-nonfree
 
-          # Pack Libraries
+          # Pack 14 Static Libraries + Headers
           cd "$PREFIX"
           zip -9 -r "$ROOT/dist/14-static-libs-android-arm64.zip" include lib
 
