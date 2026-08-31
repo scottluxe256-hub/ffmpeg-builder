@@ -145,7 +145,7 @@ jobs:
           mkdir ffmpeg_source && cd ffmpeg_source
           git init -q
           git remote add origin https://github.com/FFmpeg/FFmpeg.git
-          git fetch --depth 1 origin n9.0.1
+          git fetch --depth 1 origin master
           git checkout -q FETCH_HEAD
 
           ./configure \
@@ -173,6 +173,9 @@ jobs:
           make -j$(nproc)
           $TOOLCHAIN/bin/llvm-strip ffmpeg
 
+          # Kompresi 7z Super Kecil (Ultra Compression - LZMA2)
+          7z a -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on ffmpeg_arm64_ultra.7z ffmpeg
+
       - name: Verify Binary Dependencies
         run: |
           cd ffmpeg_source
@@ -183,5 +186,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-aarch64-static
-          path: ffmpeg_source/ffmpeg
+          name: ffmpeg-android-aarch64-ultra
+          path: ffmpeg_source/ffmpeg_arm64_ultra.7z
+          compression-level: 0
