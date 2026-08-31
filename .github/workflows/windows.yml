@@ -100,17 +100,26 @@ jobs:
           ninja -C "$SRC/aom/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lstdc++ -lgcc\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
-          # 7. libvpx (Fix Header via CMake)
+          # 7. libvpx (Build via ./configure bawaan vpx)
           clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
-          cmake -G "Ninja" -S "$SRC/libvpx" -B "$SRC/libvpx/build" \
-            -DCMAKE_SYSTEM_NAME=Windows \
-            -DCMAKE_C_COMPILER=$HOST-gcc \
-            -DCMAKE_CXX_COMPILER=$HOST-g++ \
-            -DCMAKE_RC_COMPILER=$HOST-windres \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DBUILD_SHARED_LIBS=OFF -DCONFIG_EXAMPLES=OFF -DCONFIG_UNIT_TESTS=OFF
-          ninja -C "$SRC/libvpx/build" install
+          mkdir -p "$SRC/libvpx-build" && cd "$SRC/libvpx-build"
+          ../libvpx/configure \
+            --target=x86_64-win64-gcc \
+            --prefix="$PREFIX" \
+            --libdir="$PREFIX/lib" \
+            --as=nasm \
+            --disable-shared \
+            --enable-static \
+            --disable-examples \
+            --disable-unit-tests \
+            --enable-vp8 \
+            --enable-vp9 \
+            --enable-postproc \
+            --enable-vp9-postproc \
+            --enable-multithread \
+            --enable-pic
+          make -j$(nproc)
+          make install
 
           # 8. mp3lame
           clone https://github.com/lameproject/lame.git "$SRC/lame"
