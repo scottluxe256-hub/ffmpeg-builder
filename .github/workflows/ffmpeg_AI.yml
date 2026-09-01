@@ -1,4 +1,4 @@
-name: Build FFmpeg Static Android ARM64 with AI
+name: Build FFmpeg Static Android ARM64 for Photo AI
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   build-android-static:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 60
 
     steps:
       - name: Checkout Repository
@@ -16,8 +16,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo cmake ninja-build wget unzip python3 binutils \
-            p7zip-full libvulkan-dev vulkan-tools
+            git yasm nasm cmake ninja-build wget unzip python3 binutils \
+            p7zip-full libvulkan-dev vulkan-tools glslang-dev glslang-tools
 
       - name: Setup Environment & Android NDK r26b
         run: |
@@ -43,9 +43,9 @@ jobs:
           ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings aarch64-linux-android-strings
           echo "$GITHUB_WORKSPACE/bin_wrapper" >> $GITHUB_PATH
 
-      # --- BUILD EXTERNAL LIBRARIES ---
+      # --- BUILD MINIMAL LIBRARIES FOR PHOTO AI ONLY ---
 
-      - name: Build External Libraries
+      - name: Build Photo & AI Libraries
         run: |
           set -euxo pipefail
           SRC="$GITHUB_WORKSPACE/build_sources"
@@ -61,137 +61,63 @@ jobs:
 
           clone() { git clone --depth 1 "$1" "$2"; }
 
-          # 1. zlib
+          # 1. zlib (Dibutuhkan FFmpeg & PNG)
           clone https://github.com/madler/zlib.git "$SRC/zlib"
           cd "$SRC/zlib" && ./configure --prefix="$PREFIX" --static
           make -j$(nproc) && make install
 
-          # 2. ogg
-          clone https://github.com/xiph/ogg.git "$SRC/ogg"
-          cd "$SRC/ogg" && ./autogen.sh
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(nproc) && make install
-
-          # 3. x264
-          clone https://code.videolan.org/videolan/x264.git "$SRC/x264"
-          cd "$SRC/x264"
-          ./configure --host="$HOST" --cross-prefix=aarch64-linux-android- --prefix="$PREFIX" --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
-          make -j$(nproc) && make install
-
-          # 4. x265
-          clone https://github.com/videolan/x265.git "$SRC/x265"
-          cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
-            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON -DENABLE_ASSEMBLY=OFF
-          ninja -C "$SRC/x265/build" install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
-
-          # 5. SVT-AV1
-          clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
-          cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
-            -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
-          ninja -C "$SRC/SVT-AV1/build" install
-
-          # 6. libaom
-          clone https://aomedia.googlesource.com/aom "$SRC/aom"
-          cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
-            -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TOOLS=OFF
-          ninja -C "$SRC/aom/build" install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
-
-          # 7. libvpx
-          clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
-          mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
-          ../libvpx/configure --target=arm64-android-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
-          make -j$(nproc) && make install
-
-          # 8. mp3lame
-          clone https://github.com/lameproject/lame.git "$SRC/lame"
-          cd "$SRC/lame" && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
-          make -j$(nproc) && make install
-
-          # 9. opus
-          clone https://github.com/xiph/opus.git "$SRC/opus"
-          cd "$SRC/opus" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(nproc) && make install
-
-          # 10. vorbis
-          clone https://github.com/xiph/vorbis.git "$SRC/vorbis"
-          cd "$SRC/vorbis" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
-          make -j$(nproc) && make install
-
-          # 11. libwebp
+          # 2. libwebp (Codec Foto WebP)
           clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
           cd "$SRC/libwebp" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
 
-          # 12. fdk-aac
-          clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
-          cd "$SRC/fdk-aac" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(nproc) && make install
-
-          # 13. Vulkan Headers
+          # 3. Vulkan Headers
           clone https://github.com/KhronosGroup/Vulkan-Headers.git "$SRC/Vulkan-Headers"
           cmake -G "Ninja" -S "$SRC/Vulkan-Headers" -B "$SRC/Vulkan-Headers/build" \
             -DCMAKE_INSTALL_PREFIX="$PREFIX"
           ninja -C "$SRC/Vulkan-Headers/build" install
 
-          # 14. Glslang (Kunci utama: matikan binary & opt agar tidak cari file target yang hilang)
+          # 4. Glslang
           clone https://github.com/KhronosGroup/glslang.git "$SRC/glslang"
           cmake -G "Ninja" -S "$SRC/glslang" -B "$SRC/glslang/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-29 \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DENABLE_OPT=OFF \
-            -DENABLE_GLSLANG_BINARIES=OFF
+            -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF
           ninja -C "$SRC/glslang/build" install
 
-          # 15. Tencent NCNN Engine (Pakai NEON & ASM aktif)
+          # 5. Tencent NCNN Engine
           git clone --depth 1 --recursive https://github.com/Tencent/ncnn.git "$SRC/ncnn"
           cmake -G "Ninja" -S "$SRC/ncnn" -B "$SRC/ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-29 \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DNCNN_VULKAN=ON \
-            -DNCNN_SYSTEM_GLSLANG=ON \
             -DNCNN_BUILD_EXAMPLES=OFF \
             -DNCNN_BUILD_TOOLS=OFF \
             -DNCNN_BUILD_BENCHMARK=OFF \
-            -DNCNN_SHARED_LIB=OFF \
-            -DNCNN_DISABLE_RTTI=OFF \
-            -DNCNN_DISABLE_EXCEPTION=OFF
+            -DNCNN_SHARED_LIB=OFF
           ninja -C "$SRC/ncnn/build" install
 
-          # 16. Real-ESRGAN NCNN Binary Executable
+          # 6. Real-ESRGAN NCNN Binary Executable
           mkdir -p "$INSTALL_DIR/bin"
           mkdir -p "$INSTALL_DIR/share/model"
           
           git config --global url."https://github.com/".insteadOf "git@github.com:"
-          
-          # The ultimate fix: --recursive makes sure libwebp and ncnn are fully downloaded!
           git clone --depth 1 --recursive https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
 
-          # No more hacks! We just pass the ARM64 flag so it builds natively without MIPS errors.
           cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-29 \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DGLSLANGVALIDATOR_EXECUTABLE=/usr/bin/glslangValidator \
             -DBUILD_SHARED_LIBS=OFF
 
           ninja -C "$SRC/realesrgan-ncnn/build"
+
+          # Copy Binary
+          cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" "$INSTALL_DIR/bin/"
 
       # --- DOWNLOAD AI PHOTO MODELS ---
 
@@ -200,7 +126,7 @@ jobs:
           MODELS_DIR="$INSTALL_DIR/share/model"
           mkdir -p "$MODELS_DIR"
 
-          # 1. Real-ESRGAN UHD General (Foto Biasa -> 3K/4K HD)
+          # 1. Real-ESRGAN UHD General
           wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-x4plus.param -O "$MODELS_DIR/realesrgan-x4plus.param" || true
           wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-x4plus.bin -O "$MODELS_DIR/realesrgan-x4plus.bin" || true
 
@@ -212,11 +138,9 @@ jobs:
           wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrnet-x4plus.param -O "$MODELS_DIR/realesrnet-x4plus.param" || true
           wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrnet-x4plus.bin -O "$MODELS_DIR/realesrnet-x4plus.bin" || true
 
-          # Cek isi folder model
           ls -lh "$MODELS_DIR"
-          
 
-      # --- BUILD FFMPEG STABLE N9.0.1 WITH AI ---
+      # --- BUILD FFMPEG STABLE N9.0.1 (PHOTO & AI ONLY) ---
 
       - name: Build FFmpeg
         run: |
@@ -224,7 +148,6 @@ jobs:
           git init -q
           git remote add origin https://github.com/FFmpeg/FFmpeg.git
           
-          # Mengunci ke release tag resmi FFmpeg n9.0.1 Stable
           git fetch --depth 1 origin tag n9.0.1
           git checkout -q FETCH_HEAD
 
@@ -239,36 +162,22 @@ jobs:
             --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
             --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
-            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread -lncnn -lvulkan -lglslang -lMachineIndependent -lGenericCodeGen -lOSDependent -lSPIRV" \
+            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread -lncnn -lvulkan" \
             --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
             --enable-asm --enable-neon \
-            --enable-gpl --enable-nonfree \
-            --enable-jni --enable-mediacodec \
+            --enable-gpl \
             --enable-vulkan \
-            --enable-libx264 --enable-libx265 --enable-libsvtav1 \
-            --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
-            --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
+            --enable-libwebp \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$(nproc)
           $TOOLCHAIN/bin/llvm-strip ffmpeg
 
-          # Copy binary realesrgan-ncnn-vulkan ke folder ffmpeg_source agar bisa di-pack bareng
           cp "$INSTALL_DIR/bin/realesrgan-ncnn-vulkan" ./
-          
-          # Salin folder model AI ke samping binary
           cp -r "$INSTALL_DIR/share/model" ./model
 
-          # Kompresi 7z (FFmpeg + Real-ESRGAN NCNN Binary + Model AI)
           7z a -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on ffmpeg_arm64_ai_photo.7z ffmpeg realesrgan-ncnn-vulkan model/
-
-      - name: Verify Binary Dependencies
-        run: |
-          cd ffmpeg_source
-          file ffmpeg
-          echo "---- NEEDED shared libraries ----"
-          $TOOLCHAIN/bin/llvm-readelf -d ffmpeg | grep -E "NEEDED|SONAME" || true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -276,4 +185,3 @@ jobs:
           name: ffmpeg-android-aarch64-ai-photo
           path: ffmpeg_source/ffmpeg_arm64_ai_photo.7z
           compression-level: 0
-          
