@@ -179,24 +179,16 @@ jobs:
           mkdir -p "$INSTALL_DIR/share/model"
           
           git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git clone --depth 1 https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
+          
+          # The ultimate fix: --recursive makes sure libwebp and ncnn are fully downloaded!
+          git clone --depth 1 --recursive https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
 
-          # CARA BRUTAL: Paksa hapus logic error dari dalam file CMake Real-ESRGAN
-          # 1. Cegah CMake mematikan USE_SYSTEM_NCNN
-          sed -i 's/set(USE_SYSTEM_NCNN OFF)//g' "$SRC/realesrgan-ncnn/src/CMakeLists.txt"
-          # 2. Ubah FATAL_ERROR submodule menjadi sekadar WARNING biasa
-          sed -i 's/message(FATAL_ERROR "The submodules were not downloaded.*/message(WARNING "Bypass submodule check")/g' "$SRC/realesrgan-ncnn/src/CMakeLists.txt"
-
-          # Eksekusi CMake dengan variabel GLSLANG_TARGET_DIR yang sudah dikembalikan
+          # No more hacks! We just pass the ARM64 flag so it builds natively without MIPS errors.
           cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -Dncnn_DIR="$PREFIX/lib/cmake/ncnn" \
-            -DGLSLANG_TARGET_DIR="$PREFIX/lib/cmake" \
-            -Dglslang_DIR="$PREFIX/lib/cmake" \
-            -DUSE_SYSTEM_NCNN=ON \
             -DBUILD_SHARED_LIBS=OFF
 
           ninja -C "$SRC/realesrgan-ncnn/build"
