@@ -169,11 +169,20 @@ jobs:
             -DNCNN_SHARED_LIB=OFF
           ninja -C "$SRC/ncnn/build" install
 
-          # 16. Real-ESRGAN NCNN Binary Executable
+          # 16. Real-ESRGAN NCNN Binary Executable (Fix SSH Permission Error)
           mkdir -p "$INSTALL_DIR/bin"
           mkdir -p "$INSTALL_DIR/share/model"
-          git clone --depth 1 --recursive https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
           
+          # Paksa git ganti protokol SSH ke HTTPS di level runner
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+          git clone --depth 1 https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
+          
+          # Manual init submodule (supaya kepancing pake HTTPS)
+          cd "$SRC/realesrgan-ncnn"
+          git submodule update --init --recursive
+          cd -
+
           cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
@@ -181,9 +190,9 @@ jobs:
             -Dncnn_DIR="$PREFIX/lib/cmake/ncnn" \
             -DGLSLANG_TARGET_DIR="$PREFIX/lib/cmake" \
             -DUSE_SYSTEM_NCNN=ON
-          
+
           ninja -C "$SRC/realesrgan-ncnn/build"
-          
+
           # Copy Binary & Model AI
           cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" "$INSTALL_DIR/bin/"
           cp -r "$SRC/realesrgan-ncnn/models"/* "$INSTALL_DIR/share/model/"
