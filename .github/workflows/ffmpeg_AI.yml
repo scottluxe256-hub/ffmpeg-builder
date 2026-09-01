@@ -147,18 +147,21 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$PREFIX"
           ninja -C "$SRC/Vulkan-Headers/build" install
 
-          # 14. Glslang (Kunci utama: -DENABLE_GLSLANG_BINARIES=OFF -DENABLE_SPVGEN=OFF agar generate Targets.cmake)
+          # 14. Glslang (Kunci ke tag r2026.1 agar menghasilkan file *Targets.cmake)
           clone https://github.com/KhronosGroup/glslang.git "$SRC/glslang"
+          cd "$SRC/glslang"
+          git checkout sdk-1.3.290.0 || git checkout 11.13.0 || true
+          cd "$GITHUB_WORKSPACE"
+
           cmake -G "Ninja" -S "$SRC/glslang" -B "$SRC/glslang/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DBUILD_SHARED_LIBS=OFF \
-            -DENABLE_OPT=OFF \
-            -DALLOW_EXTERNAL_SPIRV=ON
+            -DENABLE_OPT=OFF
           ninja -C "$SRC/glslang/build" install
 
-          # Jika glslang menginstall file .cmake di subfolder, salin semuanya ke root lib/cmake
+          # Salin file cmake jika glslang menaruhnya di subfolder lib/cmake/glslang/
           cp -r $PREFIX/lib/cmake/glslang/* $PREFIX/lib/cmake/ 2>/dev/null || true
 
           # 15. Tencent NCNN Engine
@@ -179,11 +182,7 @@ jobs:
           mkdir -p "$INSTALL_DIR/share/model"
           
           git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git clone --depth 1 https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
-
-          # Trik agar tidak kena jebakan "submodules were not downloaded"
-          mkdir -p "$SRC/realesrgan-ncnn/src/ncnn"
-          echo 'add_library(ncnn INTERFACE)' > "$SRC/realesrgan-ncnn/src/ncnn/CMakeLists.txt"
+          git clone --depth 1 --recursive https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
 
           cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
