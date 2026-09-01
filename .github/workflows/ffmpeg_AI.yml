@@ -177,20 +177,20 @@ jobs:
           mkdir -p "$MODELS_DIR"
 
           # 1. Real-ESRGAN UHD General (Foto Biasa -> 3K/4K HD)
-          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-x4plus.param -O "$MODELS_DIR/realesrgan-x4plus.param"
-          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-x4plus.bin -O "$MODELS_DIR/realesrgan-x4plus.bin"
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-x4plus.param -O "$MODELS_DIR/realesrgan-x4plus.param" || true
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-x4plus.bin -O "$MODELS_DIR/realesrgan-x4plus.bin" || true
 
-          # 2. Real-ESRGAN Anime/Kartun
-          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.param -O "$MODELS_DIR/realesr-animevideov3.param"
-          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.bin -O "$MODELS_DIR/realesr-animevideov3.bin"
+          # 2. Real-ESRGAN Anime / Kartun
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.param -O "$MODELS_DIR/realesr-animevideov3.param" || true
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.bin -O "$MODELS_DIR/realesr-animevideov3.bin" || true
 
-          # 3. Real-ESRGAN Line-Art/Icon/Text/Logo
-          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus_anime_6B.param -O "$MODELS_DIR/realesrgan-x4plus-anime.param"
-          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus_anime_6B.bin -O "$MODELS_DIR/realesrgan-x4plus-anime.bin"
+          # 3. Real-ESRGAN Line-Art / Icon / Text / Logo
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrnet-x4plus.param -O "$MODELS_DIR/realesrnet-x4plus.param" || true
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrnet-x4plus.bin -O "$MODELS_DIR/realesrnet-x4plus.bin" || true
 
-          # 4. SCUNet (Denoise & Deblur Foto Rusak/Sangat Blur)
-          wget -q https://github.com/cszn/KAIR/releases/download/v1.0/scunet_color_real_psnr.param -O "$MODELS_DIR/scunet.param" || true
-          wget -q https://github.com/cszn/KAIR/releases/download/v1.0/scunet_color_real_psnr.bin -O "$MODELS_DIR/scunet.bin" || true
+          # Cek isi folder model
+          ls -lh "$MODELS_DIR"
+          
 
       # --- BUILD FFMPEG STABLE N9.0.1 WITH AI ---
 
