@@ -169,6 +169,19 @@ jobs:
             -DNCNN_SHARED_LIB=OFF
           ninja -C "$SRC/ncnn/build" install
 
+          # 16. Real-ESRGAN NCNN Binary Executable (Ditaruh tepat di sini!)
+          mkdir -p "$INSTALL_DIR/bin"
+          clone https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
+          cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -Dncnn_DIR="$PREFIX/lib/cmake/ncnn" \
+            -DGLSLANG_TARGET_DIR="$PREFIX/lib/cmake"
+          ninja -C "$SRC/realesrgan-ncnn/build"
+          
+          cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" "$INSTALL_DIR/bin/"
+
       # --- DOWNLOAD AI PHOTO MODELS ---
 
       - name: Download AI Photo Models
@@ -230,11 +243,14 @@ jobs:
           make -j$(nproc)
           $TOOLCHAIN/bin/llvm-strip ffmpeg
 
-          # Salin folder model AI ke samping binary ffmpeg
+          # Copy binary realesrgan-ncnn-vulkan ke folder ffmpeg_source agar bisa di-pack bareng
+          cp "$INSTALL_DIR/bin/realesrgan-ncnn-vulkan" ./
+          
+          # Salin folder model AI ke samping binary
           cp -r "$INSTALL_DIR/share/model" ./model
 
-          # Kompresi 7z FFmpeg + Model AI Foto
-          7z a -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on ffmpeg_arm64_ai_photo.7z ffmpeg model/
+          # Kompresi 7z (FFmpeg + Real-ESRGAN NCNN Binary + Model AI)
+          7z a -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on ffmpeg_arm64_ai_photo.7z ffmpeg realesrgan-ncnn-vulkan model/
 
       - name: Verify Binary Dependencies
         run: |
@@ -249,3 +265,4 @@ jobs:
           name: ffmpeg-android-aarch64-ai-photo
           path: ffmpeg_source/ffmpeg_arm64_ai_photo.7z
           compression-level: 0
+          
