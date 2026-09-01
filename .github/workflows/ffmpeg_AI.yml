@@ -147,14 +147,19 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$PREFIX"
           ninja -C "$SRC/Vulkan-Headers/build" install
 
-          # 14. Glslang
+          # 14. Glslang (Kunci utama: -DENABLE_GLSLANG_BINARIES=OFF -DENABLE_SPVGEN=OFF agar generate Targets.cmake)
           clone https://github.com/KhronosGroup/glslang.git "$SRC/glslang"
           cmake -G "Ninja" -S "$SRC/glslang" -B "$SRC/glslang/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF
+            -DBUILD_SHARED_LIBS=OFF \
+            -DENABLE_OPT=OFF \
+            -DALLOW_EXTERNAL_SPIRV=ON
           ninja -C "$SRC/glslang/build" install
+
+          # Jika glslang menginstall file .cmake di subfolder, salin semuanya ke root lib/cmake
+          cp -r $PREFIX/lib/cmake/glslang/* $PREFIX/lib/cmake/ 2>/dev/null || true
 
           # 15. Tencent NCNN Engine
           git clone --depth 1 --recursive https://github.com/Tencent/ncnn.git "$SRC/ncnn"
@@ -175,10 +180,10 @@ jobs:
           
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git clone --depth 1 https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
-          
-          # Bypass pengecekan submodul ncnn bawaan
+
+          # Trik agar tidak kena jebakan "submodules were not downloaded"
           mkdir -p "$SRC/realesrgan-ncnn/src/ncnn"
-          touch "$SRC/realesrgan-ncnn/src/ncnn/CMakeLists.txt"
+          echo 'add_library(ncnn INTERFACE)' > "$SRC/realesrgan-ncnn/src/ncnn/CMakeLists.txt"
 
           cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
@@ -191,7 +196,7 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF
 
           ninja -C "$SRC/realesrgan-ncnn/build"
-          
+
       # --- DOWNLOAD AI PHOTO MODELS ---
 
       - name: Download AI Photo Models
