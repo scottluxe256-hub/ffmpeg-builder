@@ -1,0 +1,251 @@
+name: Build FFmpeg Static Android ARM64 with AI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-android-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
+            git yasm nasm texinfo cmake ninja-build wget unzip python3 binutils \
+            p7zip-full libvulkan-dev vulkan-tools
+
+      - name: Setup Environment & Android NDK r26b
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+
+          INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
+
+          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
+          echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
+          echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
+
+          # Wrapper symlink toolchain NDK
+          mkdir -p $GITHUB_WORKSPACE/bin_wrapper
+          cd $GITHUB_WORKSPACE/bin_wrapper
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar aarch64-linux-android-ar
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-as aarch64-linux-android-as
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ld aarch64-linux-android-ld
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm aarch64-linux-android-nm
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib aarch64-linux-android-ranlib
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip aarch64-linux-android-strip
+          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings aarch64-linux-android-strings
+          echo "$GITHUB_WORKSPACE/bin_wrapper" >> $GITHUB_PATH
+
+      # --- BUILD EXTERNAL LIBRARIES ---
+
+      - name: Build External Libraries
+        run: |
+          set -euxo pipefail
+          SRC="$GITHUB_WORKSPACE/build_sources"
+          PREFIX="$INSTALL_DIR"
+          HOST="aarch64-linux-android"
+
+          mkdir -p "$SRC" "$PREFIX/lib/pkgconfig" "$PREFIX/include"
+
+          export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
+          export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
+          export CFLAGS="-O3 -fPIC -march=armv8-a+simd+crypto"
+          export CXXFLAGS="$CFLAGS"
+
+          clone() { git clone --depth 1 "$1" "$2"; }
+
+          # 1. zlib
+          clone https://github.com/madler/zlib.git "$SRC/zlib"
+          cd "$SRC/zlib" && ./configure --prefix="$PREFIX" --static
+          make -j$(nproc) && make install
+
+          # 2. ogg
+          clone https://github.com/xiph/ogg.git "$SRC/ogg"
+          cd "$SRC/ogg" && ./autogen.sh
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+          # 3. x264
+          clone https://code.videolan.org/videolan/x264.git "$SRC/x264"
+          cd "$SRC/x264"
+          ./configure --host="$HOST" --cross-prefix=aarch64-linux-android- --prefix="$PREFIX" --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
+          make -j$(nproc) && make install
+
+          # 4. x265
+          clone https://github.com/videolan/x265.git "$SRC/x265"
+          cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON -DENABLE_ASSEMBLY=OFF
+          ninja -C "$SRC/x265/build" install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
+
+          # 5. SVT-AV1
+          clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
+          cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
+          ninja -C "$SRC/SVT-AV1/build" install
+
+          # 6. libaom
+          clone https://aomedia.googlesource.com/aom "$SRC/aom"
+          cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TOOLS=OFF
+          ninja -C "$SRC/aom/build" install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
+
+          # 7. libvpx
+          clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
+          mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
+          ../libvpx/configure --target=arm64-android-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
+          make -j$(nproc) && make install
+
+          # 8. mp3lame
+          clone https://github.com/lameproject/lame.git "$SRC/lame"
+          cd "$SRC/lame" && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
+          make -j$(nproc) && make install
+
+          # 9. opus
+          clone https://github.com/xiph/opus.git "$SRC/opus"
+          cd "$SRC/opus" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+          # 10. vorbis
+          clone https://github.com/xiph/vorbis.git "$SRC/vorbis"
+          cd "$SRC/vorbis" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
+          make -j$(nproc) && make install
+
+          # 11. libwebp
+          clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
+          cd "$SRC/libwebp" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
+
+          # 12. fdk-aac
+          clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
+          cd "$SRC/fdk-aac" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+          # --- ADDING VULKAN, GLSLANG, & NCNN FOR ANDROID ARM64 ---
+
+          # 13. Vulkan Headers
+          clone https://github.com/KhronosGroup/Vulkan-Headers.git "$SRC/Vulkan-Headers"
+          cmake -G "Ninja" -S "$SRC/Vulkan-Headers" -B "$SRC/Vulkan-Headers/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX"
+          ninja -C "$SRC/Vulkan-Headers/build" install
+
+          # 14. Glslang
+          clone https://github.com/KhronosGroup/glslang.git "$SRC/glslang"
+          cmake -G "Ninja" -S "$SRC/glslang" -B "$SRC/glslang/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF
+          ninja -C "$SRC/glslang/build" install
+
+          # 15. Tencent NCNN Engine (Optimized for Mobile GPU Vulkan)
+          clone https://github.com/Tencent/ncnn.git "$SRC/ncnn"
+          cmake -G "Ninja" -S "$SRC/ncnn" -B "$SRC/ncnn/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DNCNN_VULKAN=ON \
+            -DNCNN_BUILD_EXAMPLES=OFF \
+            -DNCNN_BUILD_TOOLS=OFF \
+            -DNCNN_BUILD_BENCHMARK=OFF \
+            -DNCNN_SHARED_LIB=OFF
+          ninja -C "$SRC/ncnn/build" install
+
+      # --- DOWNLOAD AI PHOTO MODELS ---
+
+      - name: Download AI Photo Models
+        run: |
+          MODELS_DIR="$INSTALL_DIR/share/model"
+          mkdir -p "$MODELS_DIR"
+
+          # 1. Real-ESRGAN UHD General (Foto Biasa -> 3K/4K HD)
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-x4plus.param -O "$MODELS_DIR/realesrgan-x4plus.param"
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-x4plus.bin -O "$MODELS_DIR/realesrgan-x4plus.bin"
+
+          # 2. Real-ESRGAN Anime/Kartun
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.param -O "$MODELS_DIR/realesr-animevideov3.param"
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.bin -O "$MODELS_DIR/realesr-animevideov3.bin"
+
+          # 3. Real-ESRGAN Line-Art/Icon/Text/Logo
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus_anime_6B.param -O "$MODELS_DIR/realesrgan-x4plus-anime.param"
+          wget -q https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus_anime_6B.bin -O "$MODELS_DIR/realesrgan-x4plus-anime.bin"
+
+          # 4. SCUNet (Denoise & Deblur Foto Rusak/Sangat Blur)
+          wget -q https://github.com/cszn/KAIR/releases/download/v1.0/scunet_color_real_psnr.param -O "$MODELS_DIR/scunet.param" || true
+          wget -q https://github.com/cszn/KAIR/releases/download/v1.0/scunet_color_real_psnr.bin -O "$MODELS_DIR/scunet.bin" || true
+
+      # --- BUILD FFMPEG STABLE N9.0.1 WITH AI ---
+
+      - name: Build FFmpeg
+        run: |
+          mkdir ffmpeg_source && cd ffmpeg_source
+          git init -q
+          git remote add origin https://github.com/FFmpeg/FFmpeg.git
+          
+          # Mengunci ke release tag resmi FFmpeg n9.0.1 Stable
+          git fetch --depth 1 origin tag n9.0.1
+          git checkout -q FETCH_HEAD
+
+          ./configure \
+            --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
+            --cc=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
+            --cxx=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
+            --ar=aarch64-linux-android-ar \
+            --ranlib=aarch64-linux-android-ranlib \
+            --strip=aarch64-linux-android-strip \
+            --pkg-config=pkg-config --pkg-config-flags="--static" \
+            --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
+            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread -lncnn -lvulkan -lglslang -lMachineIndependent -lGenericCodeGen -lOSDependent -lSPIRV" \
+            --prefix=$INSTALL_DIR \
+            --enable-static --disable-shared \
+            --enable-asm --enable-neon \
+            --enable-gpl --enable-nonfree \
+            --enable-jni --enable-mediacodec \
+            --enable-vulkan \
+            --enable-libx264 --enable-libx265 --enable-libsvtav1 \
+            --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
+            --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
+          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
+
+          make -j$(nproc)
+          $TOOLCHAIN/bin/llvm-strip ffmpeg
+
+          # Salin folder model AI ke samping binary ffmpeg
+          cp -r "$INSTALL_DIR/share/model" ./model
+
+          # Kompresi 7z FFmpeg + Model AI Foto
+          7z a -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on ffmpeg_arm64_ai_photo.7z ffmpeg model/
+
+      - name: Verify Binary Dependencies
+        run: |
+          cd ffmpeg_source
+          file ffmpeg
+          echo "---- NEEDED shared libraries ----"
+          $TOOLCHAIN/bin/llvm-readelf -d ffmpeg | grep -E "NEEDED|SONAME" || true
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-android-aarch64-ai-photo
+          path: ffmpeg_source/ffmpeg_arm64_ai_photo.7z
+          compression-level: 0
