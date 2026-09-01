@@ -153,10 +153,10 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF
+            -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF -DALLOW_EXTERNAL_SPIRV=ON
           ninja -C "$SRC/glslang/build" install
 
-          # 15. Tencent NCNN Engine (Fix Submodule Error)
+          # 15. Tencent NCNN Engine
           git clone --depth 1 --recursive https://github.com/Tencent/ncnn.git "$SRC/ncnn"
           cmake -G "Ninja" -S "$SRC/ncnn" -B "$SRC/ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
@@ -176,25 +176,21 @@ jobs:
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git clone --depth 1 https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
           
-          # Hapus folder ncnn bawaan submodul biar gak bikin CMake bingung/build ulang MIPS
-          rm -rf "$SRC/realesrgan-ncnn/src/ncnn"
+          # Hapus CMakeLists ncnn bawaan agar tidak memaksa build submodul
+          rm -f "$SRC/realesrgan-ncnn/src/ncnn/CMakeLists.txt"
 
           cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -Dncnn_DIR="$PREFIX/lib/cmake/ncnn" \
-            -Dglslang_DIR="$PREFIX/lib/cmake" \
-            -DGLSLANG_TARGET_DIR="$PREFIX/lib/cmake" \
+            -Dglslang_DIR="$PREFIX/lib/cmake/glslang" \
+            -DSPIRV-Tools_DIR="$PREFIX/lib/cmake/SPIRV-Tools" \
             -DUSE_SYSTEM_NCNN=ON \
             -DBUILD_SHARED_LIBS=OFF
 
           ninja -C "$SRC/realesrgan-ncnn/build"
 
-          # Copy Binary & Model AI
-          cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" "$INSTALL_DIR/bin/"
-          cp -r "$SRC/realesrgan-ncnn/models"/* "$INSTALL_DIR/share/model/"
-          
       # --- DOWNLOAD AI PHOTO MODELS ---
 
       - name: Download AI Photo Models
