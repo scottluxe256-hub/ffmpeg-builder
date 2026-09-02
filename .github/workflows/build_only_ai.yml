@@ -79,7 +79,15 @@ jobs:
 
           ninja -C "$SRC/realesrgan-ncnn/build"
 
-          # Pack Biner AI saja
+          # Pack Biner AI secara pasti ke root workspace
+          cd "$GITHUB_WORKSPACE"
           mkdir -p output_ai
           cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" output_ai/
-          7z a -t7z -mx=9 realesrgan-ncnn-vulkan-static.7z output_ai/realesrgan-ncnn-vulkan
+          7z a -t7z -mx=9 "$GITHUB_WORKSPACE/realesrgan-ncnn-vulkan-static.7z" output_ai/realesrgan-ncnn-vulkan
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: realesrgan-ncnn-vulkan-static
+          path: ${{ github.workspace }}/realesrgan-ncnn-vulkan-static.7z
+          
