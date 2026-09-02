@@ -70,6 +70,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DGLSLANGVALIDATOR_EXECUTABLE=/usr/bin/glslangValidator \
             -DENABLE_OPENMP=OFF \
+            -DOPENMP_ENABLE=OFF \
+            -DCMAKE_CXX_FLAGS="-fno-openmp" \
             -DBUILD_SHARED_LIBS=OFF
 
           ninja -C "$SRC/realesrgan-ncnn/build"
