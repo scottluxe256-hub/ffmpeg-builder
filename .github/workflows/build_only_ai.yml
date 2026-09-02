@@ -1,0 +1,87 @@
+name: Build Static Real-ESRGAN Binary Only
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ai-binary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build wget unzip glslang-tools 7z
+
+      - name: Setup Android NDK r26b
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
+
+      - name: Build Static Real-ESRGAN
+        run: |
+          set -euxo pipefail
+          SRC="$GITHUB_WORKSPACE/build_sources"
+          PREFIX="$GITHUB_WORKSPACE/build_assets"
+
+          mkdir -p "$SRC" "$PREFIX"
+
+          # 1. Vulkan Headers
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$SRC/Vulkan-Headers"
+          cmake -G "Ninja" -S "$SRC/Vulkan-Headers" -B "$SRC/Vulkan-Headers/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX"
+          ninja -C "$SRC/Vulkan-Headers/build" install
+
+          # 2. Glslang
+          git clone --depth 1 https://github.com/KhronosGroup/glslang.git "$SRC/glslang"
+          cmake -G "Ninja" -S "$SRC/glslang" -B "$SRC/glslang/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF
+          ninja -C "$SRC/glslang/build" install
+
+          # 3. NCNN (Disable OpenMP agar 100% static tanpa libomp.so)
+          git clone --depth 1 --recursive https://github.com/Tencent/ncnn.git "$SRC/ncnn"
+          cmake -G "Ninja" -S "$SRC/ncnn" -B "$SRC/ncnn/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DNCNN_VULKAN=ON \
+            -DNCNN_OPENMP=OFF \
+            -DNCNN_BUILD_EXAMPLES=OFF \
+            -DNCNN_BUILD_TOOLS=OFF \
+            -DNCNN_BUILD_BENCHMARK=OFF \
+            -DNCNN_SHARED_LIB=OFF
+          ninja -C "$SRC/ncnn/build" install
+
+          # 4. Real-ESRGAN NCNN Binary Executable
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git clone --depth 1 --recursive https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
+
+          cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DGLSLANGVALIDATOR_EXECUTABLE=/usr/bin/glslangValidator \
+            -DENABLE_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+
+          ninja -C "$SRC/realesrgan-ncnn/build"
+
+          # Pack Biner AI saja
+          mkdir -p output_ai
+          cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" output_ai/
+          7z a -t7z -mx=9 realesrgan-ncnn-vulkan-static.7z output_ai/realesrgan-ncnn-vulkan
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: realesrgan-ncnn-vulkan-static
+          path: realesrgan-ncnn-vulkan-static.7z
+          
