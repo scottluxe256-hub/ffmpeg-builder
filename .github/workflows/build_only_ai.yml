@@ -46,11 +46,12 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF
           ninja -C "$SRC/glslang/build" install
 
-          # 3. NCNN (Disable OpenMP agar 100% static tanpa libomp.so)
+          # 3. NCNN (Matikan OpenMP & pakai STL Static)
           git clone --depth 1 --recursive https://github.com/Tencent/ncnn.git "$SRC/ncnn"
           cmake -G "Ninja" -S "$SRC/ncnn" -B "$SRC/ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DANDROID_STL=c++_static \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DNCNN_VULKAN=ON \
             -DNCNN_OPENMP=OFF \
@@ -60,18 +61,20 @@ jobs:
             -DNCNN_SHARED_LIB=OFF
           ninja -C "$SRC/ncnn/build" install
 
-          # 4. Real-ESRGAN NCNN Binary Executable
+          # 4. Real-ESRGAN NCNN (Hapus paksa OpenMP dari CMakeLists.txt)
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git clone --depth 1 --recursive https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
+
+          # Hapus baris OpenMP secara paksa dari file CMakeLists.txt bawaan repo
+          sed -i '/find_package(OpenMP/d' "$SRC/realesrgan-ncnn/src/CMakeLists.txt"
+          sed -i '/OpenMP::OpenMP_CXX/d' "$SRC/realesrgan-ncnn/src/CMakeLists.txt"
 
           cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DANDROID_STL=c++_static \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DGLSLANGVALIDATOR_EXECUTABLE=/usr/bin/glslangValidator \
-            -DENABLE_OPENMP=OFF \
-            -DOPENMP_ENABLE=OFF \
-            -DCMAKE_CXX_FLAGS="-fno-openmp" \
             -DBUILD_SHARED_LIBS=OFF
 
           ninja -C "$SRC/realesrgan-ncnn/build"
@@ -80,10 +83,3 @@ jobs:
           mkdir -p output_ai
           cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" output_ai/
           7z a -t7z -mx=9 realesrgan-ncnn-vulkan-static.7z output_ai/realesrgan-ncnn-vulkan
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: realesrgan-ncnn-vulkan-static
-          path: realesrgan-ncnn-vulkan-static.7z
-          
