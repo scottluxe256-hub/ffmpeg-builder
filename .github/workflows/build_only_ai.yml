@@ -15,8 +15,8 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build wget unzip glslang-tools p7zip-full
-          
+          sudo apt-get install -y build-essential cmake ninja-build wget unzip glslang-tools
+
       - name: Setup Android NDK r26b
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
@@ -46,7 +46,7 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF
           ninja -C "$SRC/glslang/build" install
 
-          # 3. NCNN (Matikan OpenMP & pakai STL Static)
+          # 3. NCNN (Matikan OpenMP total & C++ Static)
           git clone --depth 1 --recursive https://github.com/Tencent/ncnn.git "$SRC/ncnn"
           cmake -G "Ninja" -S "$SRC/ncnn" -B "$SRC/ncnn/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
@@ -61,11 +61,11 @@ jobs:
             -DNCNN_SHARED_LIB=OFF
           ninja -C "$SRC/ncnn/build" install
 
-          # 4. Real-ESRGAN NCNN (Hapus paksa OpenMP dari CMakeLists.txt)
+          # 4. Real-ESRGAN NCNN (Hapus paksa ketergantungan OpenMP)
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git clone --depth 1 --recursive https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
 
-          # Hapus baris OpenMP secara paksa dari file CMakeLists.txt bawaan repo
+          # Hapus pemicu OpenMP dari CMakeLists.txt bawaan
           sed -i '/find_package(OpenMP/d' "$SRC/realesrgan-ncnn/src/CMakeLists.txt"
           sed -i '/OpenMP::OpenMP_CXX/d' "$SRC/realesrgan-ncnn/src/CMakeLists.txt"
 
@@ -79,15 +79,11 @@ jobs:
 
           ninja -C "$SRC/realesrgan-ncnn/build"
 
-          # Pack Biner AI secara pasti ke root workspace
-          cd "$GITHUB_WORKSPACE"
-          mkdir -p output_ai
-          cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" output_ai/
-          7z a -t7z -mx=9 "$GITHUB_WORKSPACE/realesrgan-ncnn-vulkan-static.7z" output_ai/realesrgan-ncnn-vulkan
+          # Ambil biner mentah langsung ke root workspace
+          cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" "$GITHUB_WORKSPACE/realesrgan-ncnn-vulkan"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: realesrgan-ncnn-vulkan-static
-          path: ${{ github.workspace }}/realesrgan-ncnn-vulkan-static.7z
-          
+          path: ${{ github.workspace }}/realesrgan-ncnn-vulkan
