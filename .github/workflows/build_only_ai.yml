@@ -1,4 +1,4 @@
-name: Build Custom FFmpeg Windows Static
+name: Build Custom FFmpeg Windows Static (v9.0.1 / Latest)
 
 on:
   workflow_dispatch:
@@ -40,28 +40,28 @@ jobs:
       - name: Clone FFmpeg Windows Build Helpers
         run: |
           git clone https://github.com/rdp/ffmpeg-windows-build-helpers.git
-          cd ffmpeg-windows-build-helpers
 
       - name: Build Static FFmpeg with Custom Encoders
         run: |
           cd ffmpeg-windows-build-helpers
           
-          # Konfigurasi opsi compile custom
+          # Flag --git-get-latest=y akan selalu menarik update source code git terbaru (v9.0.1+)
           ./cross_compile_ffmpeg.sh \
-            --build-ffmpeg-static=y \
             --compiler-flavors=win64 \
+            --build-ffmpeg-static=y \
+            --git-get-latest=y \
             --enable-gpl=y \
-            --custom-hangover="--enable-nonfree --enable-gpl --enable-version3 --enable-libfdk-aac --enable-libavif --enable-libwebp --enable-libvvenc --extra-cflags=-static --extra-ldflags=-static"
+            --enable-nonfree=y \
+            --extra-ffmpeg-options="--enable-libfdk-aac --enable-libavif --enable-libwebp --enable-libvvenc"
 
       - name: Locate and Collect Binaries
         run: |
           mkdir -p output
-          # Mencari file exe hasil kompilasi
-          find ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg_git* -name "ffmpeg.exe" -exec cp {} output/ \; 2>/dev/null || true
-          find ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg_git* -name "ffprobe.exe" -exec cp {} output/ \; 2>/dev/null || true
+          find ffmpeg-windows-build-helpers/sandbox -name "ffmpeg.exe" -exec cp {} output/ \; 2>/dev/null || true
+          find ffmpeg-windows-build-helpers/sandbox -name "ffprobe.exe" -exec cp {} output/ \; 2>/dev/null || true
 
       - name: Upload FFmpeg Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-windows-static-custom
+          name: ffmpeg-windows-static-v9.0.1
           path: output/*.exe
