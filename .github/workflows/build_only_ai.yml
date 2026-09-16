@@ -1,89 +1,67 @@
-name: Build Static Real-ESRGAN Binary Only
+name: Build Custom FFmpeg Windows Static
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-ai-binary:
+  build-ffmpeg:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies
+      - name: Install Build Dependencies & MinGW Cross-Compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build wget unzip glslang-tools
+          sudo apt-get install -y \
+            build-essential \
+            mingw-w64 \
+            g++-mingw-w64-x86-64 \
+            gcc-mingw-w64-x86-64 \
+            gfortran-mingw-w64-x86-64 \
+            pkg-config \
+            cmake \
+            ninja-build \
+            meson \
+            nasm \
+            yasm \
+            autoconf \
+            automake \
+            libtool \
+            git \
+            subversion \
+            mercurial \
+            p7zip-full \
+            curl \
+            wget \
+            python3-pip
 
-      - name: Setup Android NDK r26b
+      - name: Clone FFmpeg Windows Build Helpers
         run: |
-          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
-          unzip -q android-ndk-r26b-linux.zip
-          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
+          git clone https://github.com/rdp/ffmpeg-windows-build-helpers.git
+          cd ffmpeg-windows-build-helpers
 
-      - name: Build Static Real-ESRGAN
+      - name: Build Static FFmpeg with Custom Encoders
         run: |
-          set -euxo pipefail
-          SRC="$GITHUB_WORKSPACE/build_sources"
-          PREFIX="$GITHUB_WORKSPACE/build_assets"
+          cd ffmpeg-windows-build-helpers
+          
+          # Konfigurasi opsi compile custom
+          ./cross_compile_ffmpeg.sh \
+            --build-ffmpeg-static=y \
+            --compiler-flavors=win64 \
+            --enable-gpl=y \
+            --custom-hangover="--enable-nonfree --enable-gpl --enable-version3 --enable-libfdk-aac --enable-libavif --enable-libwebp --enable-libvvenc --extra-cflags=-static --extra-ldflags=-static"
 
-          mkdir -p "$SRC" "$PREFIX"
+      - name: Locate and Collect Binaries
+        run: |
+          mkdir -p output
+          # Mencari file exe hasil kompilasi
+          find ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg_git* -name "ffmpeg.exe" -exec cp {} output/ \; 2>/dev/null || true
+          find ffmpeg-windows-build-helpers/sandbox/win64/ffmpeg_git* -name "ffprobe.exe" -exec cp {} output/ \; 2>/dev/null || true
 
-          # 1. Vulkan Headers
-          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$SRC/Vulkan-Headers"
-          cmake -G "Ninja" -S "$SRC/Vulkan-Headers" -B "$SRC/Vulkan-Headers/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX"
-          ninja -C "$SRC/Vulkan-Headers/build" install
-
-          # 2. Glslang
-          git clone --depth 1 https://github.com/KhronosGroup/glslang.git "$SRC/glslang"
-          cmake -G "Ninja" -S "$SRC/glslang" -B "$SRC/glslang/build" \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF
-          ninja -C "$SRC/glslang/build" install
-
-          # 3. NCNN (Matikan OpenMP total & C++ Static)
-          git clone --depth 1 --recursive https://github.com/Tencent/ncnn.git "$SRC/ncnn"
-          cmake -G "Ninja" -S "$SRC/ncnn" -B "$SRC/ncnn/build" \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DNCNN_VULKAN=ON \
-            -DNCNN_OPENMP=OFF \
-            -DNCNN_BUILD_EXAMPLES=OFF \
-            -DNCNN_BUILD_TOOLS=OFF \
-            -DNCNN_BUILD_BENCHMARK=OFF \
-            -DNCNN_SHARED_LIB=OFF
-          ninja -C "$SRC/ncnn/build" install
-
-          # 4. Real-ESRGAN NCNN (Hapus paksa ketergantungan OpenMP)
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git clone --depth 1 --recursive https://github.com/xinntao/real-esrgan-ncnn-vulkan.git "$SRC/realesrgan-ncnn"
-
-          # Hapus pemicu OpenMP dari CMakeLists.txt bawaan
-          sed -i '/find_package(OpenMP/d' "$SRC/realesrgan-ncnn/src/CMakeLists.txt"
-          sed -i '/OpenMP::OpenMP_CXX/d' "$SRC/realesrgan-ncnn/src/CMakeLists.txt"
-
-          cmake -G "Ninja" -S "$SRC/realesrgan-ncnn/src" -B "$SRC/realesrgan-ncnn/build" \
-            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DGLSLANGVALIDATOR_EXECUTABLE=/usr/bin/glslangValidator \
-            -DBUILD_SHARED_LIBS=OFF
-
-          ninja -C "$SRC/realesrgan-ncnn/build"
-
-          # Ambil biner mentah langsung ke root workspace
-          cp "$SRC/realesrgan-ncnn/build/realesrgan-ncnn-vulkan" "$GITHUB_WORKSPACE/realesrgan-ncnn-vulkan"
-
-      - name: Upload Artifact
+      - name: Upload FFmpeg Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: realesrgan-ncnn-vulkan-static
-          path: ${{ github.workspace }}/realesrgan-ncnn-vulkan
+          name: ffmpeg-windows-static-custom
+          path: output/*.exe
