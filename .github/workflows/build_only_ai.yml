@@ -1,67 +1,147 @@
-name: Build Custom FFmpeg Windows Static (v9.0.1 / Latest)
+name: Build FFmpeg Static Windows x64 Minimal
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-ffmpeg:
+  build-windows-static:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies & MinGW Cross-Compiler
+      - name: Install Build Dependencies & MinGW
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            mingw-w64 \
-            g++-mingw-w64-x86-64 \
-            gcc-mingw-w64-x86-64 \
-            gfortran-mingw-w64-x86-64 \
-            pkg-config \
-            cmake \
-            ninja-build \
-            meson \
-            nasm \
-            yasm \
-            autoconf \
-            automake \
-            libtool \
-            git \
-            subversion \
-            mercurial \
-            p7zip-full \
-            curl \
-            wget \
-            python3-pip
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
+            git yasm nasm texinfo cmake ninja-build wget unzip python3 binutils \
+            mingw-w64 p7zip-full
 
-      - name: Clone FFmpeg Windows Build Helpers
+      - name: Setup Environment
         run: |
-          git clone https://github.com/rdp/ffmpeg-windows-build-helpers.git
+          INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
+          mkdir -p "$INSTALL_DIR"
 
-      - name: Build Static FFmpeg with Custom Encoders
+          echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
+
+      # --- BUILD EXTERNAL LIBRARIES ---
+
+      - name: Build Target Libraries (fdk-aac, libwebp, libavif, libvvenc)
         run: |
-          cd ffmpeg-windows-build-helpers
-          
-          # Flag --git-get-latest=y akan selalu menarik update source code git terbaru (v9.0.1+)
-          ./cross_compile_ffmpeg.sh \
-            --compiler-flavors=win64 \
-            --build-ffmpeg-static=y \
-            --git-get-latest=y \
-            --enable-gpl=y \
-            --enable-nonfree=y \
-            --extra-ffmpeg-options="--enable-libfdk-aac --enable-libavif --enable-libwebp --enable-libvvenc"
+          set -euxo pipefail
+          SRC="$GITHUB_WORKSPACE/build_sources"
+          PREFIX="$INSTALL_DIR"
+          HOST="x86_64-w64-mingw32"
 
-      - name: Locate and Collect Binaries
+          mkdir -p "$SRC" "$PREFIX/lib/pkgconfig" "$PREFIX/include"
+
+          export CC=$HOST-gcc
+          export CXX=$HOST-g++
+          export AR=$HOST-ar
+          export RANLIB=$HOST-ranlib
+          export CFLAGS="-O3 -static-libgcc -static-libstdc++"
+          export CXXFLAGS="$CFLAGS"
+
+          clone() { git clone --depth 1 "$1" "$2"; }
+
+          # 1. FDK-AAC (High Quality Audio)
+          clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
+          cd "$SRC/fdk-aac" && ./autogen.sh
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+          # 2. LibWebP (WebP Image Encoder)
+          clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
+          cd "$SRC/libwebp" && ./autogen.sh
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.4.0\nLibs: -L\${libdir} -lwebp -lsharpyuv -lstdc++ -lgcc\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
+
+          # 3. LibVVEnc (H.266 / VVC Video Encoder)
+          clone https://github.com/fraunhoferhhi/vvenc.git "$SRC/vvenc"
+          cmake -G "Ninja" -S "$SRC/vvenc" -B "$SRC/vvenc/build" \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=$HOST-gcc \
+            -DCMAKE_CXX_COMPILER=$HOST-g++ \
+            -DCMAKE_RC_COMPILER=$HOST-windres \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DVVENC_ENABLE_LINK_TIME_OPT=OFF
+          ninja -C "$SRC/vvenc/build" install
+
+          # 4a. LibAOM (Mesin AV1 dasar untuk libavif)
+          clone https://aomedia.googlesource.com/aom "$SRC/aom"
+          cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=$HOST-gcc \
+            -DCMAKE_CXX_COMPILER=$HOST-g++ \
+            -DCMAKE_RC_COMPILER=$HOST-windres \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TOOLS=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          ninja -C "$SRC/aom/build" install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lstdc++ -lgcc\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
+
+          # 4b. LibAVIF (AVIF Image Encoder dengan Alpha Channel Support)
+          clone https://github.com/AOMediaCodec/libavif.git "$SRC/libavif"
+          cmake -G "Ninja" -S "$SRC/libavif" -B "$SRC/libavif/build" \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=$HOST-gcc \
+            -DCMAKE_CXX_COMPILER=$HOST-g++ \
+            -DCMAKE_RC_COMPILER=$HOST-windres \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DAVIF_CODEC_AOM=ON \
+            -DAVIF_CODEC_AOM_ENCODE=ON \
+            -DAVIF_CODEC_AOM_DECODE=ON \
+            -DAVIF_BUILD_APPS=OFF \
+            -DAVIF_BUILD_TESTS=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          ninja -C "$SRC/libavif/build" install
+
+      # --- BUILD FFMPEG ---
+
+      - name: Build FFmpeg Static
         run: |
-          mkdir -p output
-          find ffmpeg-windows-build-helpers/sandbox -name "ffmpeg.exe" -exec cp {} output/ \; 2>/dev/null || true
-          find ffmpeg-windows-build-helpers/sandbox -name "ffprobe.exe" -exec cp {} output/ \; 2>/dev/null || true
+          mkdir ffmpeg_source && cd ffmpeg_source
+          git init -q
+          git remote add origin https://github.com/FFmpeg/FFmpeg.git
+          git fetch --depth 1 origin master
+          git checkout -q FETCH_HEAD
 
-      - name: Upload FFmpeg Artifacts
+          ./configure \
+            --target-os=mingw32 --arch=x86_64 --cpu=sandybridge --enable-cross-compile \
+            --cross-prefix=x86_64-w64-mingw32- \
+            --pkg-config=pkg-config --pkg-config-flags="--static" \
+            --extra-cflags="-I$INSTALL_DIR/include -D_CRT_SECURE_NO_WARNINGS" \
+            --extra-cxxflags="-I$INSTALL_DIR/include" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64 -static -static-libgcc -static-libstdc++" \
+            --extra-libs="-lpthread -lwinmm -lws2_32 -lole32 -luuid" \
+            --prefix=$INSTALL_DIR \
+            --enable-static --disable-shared \
+            --enable-x86asm --enable-inline-asm \
+            --enable-gpl --enable-nonfree \
+            --enable-libfdk-aac \
+            --enable-libwebp \
+            --enable-libvvenc \
+            --enable-libaom \
+            --enable-libavif \
+          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
+
+          make -j$(nproc)
+          x86_64-w64-mingw32-strip ffmpeg.exe
+
+          # Kompresi Ultra 7z
+          7z a -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on ffmpeg_win64_custom.7z ffmpeg.exe
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-windows-static-v9.0.1
-          path: output/*.exe
+          name: ffmpeg-custom-windows-x64
+          path: ffmpeg_source/ffmpeg_win64_custom.7z
+          compression-level: 0
