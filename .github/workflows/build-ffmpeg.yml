@@ -127,7 +127,7 @@ jobs:
           cd "$SRC/vorbis" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
           make -j$(nproc) && make install
 
-          # 11. libwebp (Hanya lib foto ini yang dipakai)
+          # 11. libwebp
           clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
           cd "$SRC/libwebp" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
@@ -138,14 +138,24 @@ jobs:
           cd "$SRC/fdk-aac" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
+          # 13. rubberband (High-Quality Pitch/Tempo Shifter)
+          clone https://github.com/breakfastquay/rubberband.git "$SRC/rubberband"
+          cd "$SRC/rubberband"
+          $CXX $CXXFLAGS -I. -Isingle -c single/RubberBandSingle.cpp -o RubberBandSingle.o
+          aarch64-linux-android-ar rcs "$PREFIX/lib/librubberband.a" RubberBandSingle.o
+          aarch64-linux-android-ranlib "$PREFIX/lib/librubberband.a"
+          mkdir -p "$PREFIX/include/rubberband"
+          cp -r rubberband/* "$PREFIX/include/rubberband/"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
+
       # --- FFMPEG ---
 
-      - name: Build FFmpeg
+      - name: Build FFmpeg 9.0.2
         run: |
           mkdir ffmpeg_source && cd ffmpeg_source
           git init -q
           git remote add origin https://github.com/FFmpeg/FFmpeg.git
-          git fetch --depth 1 origin master
+          git fetch --depth 1 origin tag n9.0.2
           git checkout -q FETCH_HEAD
 
           ./configure \
@@ -168,6 +178,7 @@ jobs:
             --enable-libx264 --enable-libx265 --enable-libsvtav1 \
             --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
             --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
+            --enable-librubberband \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$(nproc)
