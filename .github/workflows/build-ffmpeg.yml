@@ -51,7 +51,7 @@ jobs:
           PREFIX="$INSTALL_DIR"
           HOST="aarch64-linux-android"
 
-          mkdir -p "$SRC" "$PREFIX/lib/pkgconfig"
+          mkdir -p "$SRC" "$PREFIX/lib/pkgconfig" "$PREFIX/include"
 
           export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
           export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
@@ -148,6 +148,58 @@ jobs:
           cp -r rubberband/* "$PREFIX/include/rubberband/"
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
 
+          # 14. rnnoise (AI Noise Reduction)
+          clone https://github.com/xiph/rnnoise.git "$SRC/rnnoise"
+          cd "$SRC/rnnoise" && ./autogen.sh
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+
+          # 15. libbs2b (Bauer Stereophonic-to-Binaural DSP)
+          clone https://github.com/alexmarsev/libbs2b.git "$SRC/libbs2b"
+          cd "$SRC/libbs2b"
+          autoreconf -fi || true
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libbs2b\nDescription: Bauer stereophonic-to-binaural DSP\nVersion: 3.1.0\nLibs: -L\${libdir} -lbs2b -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libbs2b.pc"
+
+          # 16. libmysofa (SOFA 3D Spatial Audio)
+          clone https://github.com/hoene/libmysofa.git "$SRC/libmysofa"
+          cmake -G "Ninja" -S "$SRC/libmysofa" -B "$SRC/libmysofa/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF
+          ninja -C "$SRC/libmysofa/build" install
+
+          # 17. libsoxr (High Quality Resampler)
+          clone https://github.com/chirlu/soxr.git "$SRC/soxr"
+          cmake -G "Ninja" -S "$SRC/soxr" -B "$SRC/soxr/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+            -DWITH_OPENMP=OFF -DWITH_PTHREADS=ON
+          ninja -C "$SRC/soxr/build" install
+
+          # 18. ladspa (Header loader untuk plugin efek audio)
+          curl -sSL https://raw.githubusercontent.com/swh/ladspa/master/ladspa.h -o "$PREFIX/include/ladspa.h"
+
+          # 19. chromaprint (Audio Fingerprinting)
+          git clone --depth 1 --recursive https://github.com/acoustid/chromaprint.git "$SRC/chromaprint"
+          cmake -G "Ninja" -S "$SRC/chromaprint" -B "$SRC/chromaprint/build" \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_TOOLS=OFF -DBUILD_TESTS=OFF \
+            -DFFT_LIB=kissfft
+          ninja -C "$SRC/chromaprint/build" install
+          if [ ! -f "$PREFIX/lib/pkgconfig/libchromaprint.pc" ] && [ ! -f "$PREFIX/lib64/pkgconfig/libchromaprint.pc" ]; then
+            printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
+          fi
+
       # --- FFMPEG ---
 
       - name: Build FFmpeg 9.0.2
@@ -179,6 +231,12 @@ jobs:
             --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
             --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
             --enable-librubberband \
+            --enable-librnnoise \
+            --enable-libbs2b \
+            --enable-libmysofa \
+            --enable-libsoxr \
+            --enable-ladspa \
+            --enable-libchromaprint \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
 
           make -j$(nproc)
