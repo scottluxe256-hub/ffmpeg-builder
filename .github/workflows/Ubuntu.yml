@@ -1,0 +1,180 @@
+name: Build FFmpeg Static Linux x86_64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-linux-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies (APT)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config nasm yasm cmake git curl ninja-build python3
+
+      - name: Setup Environment Variables
+        run: |
+          INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
+          SRC_DIR="$GITHUB_WORKSPACE/build_sources"
+
+          mkdir -p "$SRC_DIR" "$INSTALL_DIR/lib/pkgconfig" "$INSTALL_DIR/lib64/pkgconfig" "$INSTALL_DIR/include"
+
+          echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "PREFIX=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "SRC=$SRC_DIR" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig:$INSTALL_DIR/share/pkgconfig" >> $GITHUB_ENV
+          echo "CFLAGS=-O3 -fPIC" >> $GITHUB_ENV
+          echo "CXXFLAGS=-O3 -fPIC" >> $GITHUB_ENV
+          echo "LDFLAGS=-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" >> $GITHUB_ENV
+
+      # --- BUILD EXTERNAL LIBRARIES (FOKUS VIDEO & CORE AUDIO) ---
+
+      - name: "1. Build zlib"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/madler/zlib.git "$SRC/zlib"
+          cd "$SRC/zlib"
+          ./configure --prefix="$PREFIX" --static
+          make -j$(nproc) && make install
+
+      - name: "2. Build x264"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git "$SRC/x264"
+          cd "$SRC/x264"
+          ./configure --prefix="$PREFIX" --enable-static --enable-pic --disable-cli
+          make -j$(nproc) && make install
+
+      - name: "3. Build x265 (Official v4.3 - Assembly ON)"
+        run: |
+          set -euxo pipefail
+          curl -sSL "https://github.com/Multicorewareinc/x265/releases/download/4.3/x265_4.3.tar.gz" -o x265_4.3.tar.gz
+          mkdir -p "$SRC/x265"
+          tar -xzf x265_4.3.tar.gz -C "$SRC/x265" --strip-components=1
+
+          sed -i '/CMP0025/d' "$SRC/x265/source/CMakeLists.txt"
+          sed -i '/CMP0054/d' "$SRC/x265/source/CMakeLists.txt"
+
+          cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_CLI=OFF \
+            -DEXPORT_C_API=ON \
+            -DENABLE_ASSEMBLY=ON \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/x265/build" install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 4.3\nLibs: -L\${libdir} -lx265 -lstdc++ -lm -lrt -ldl\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
+
+      - name: "4. Build SVT-AV1"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
+          cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_APPS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/SVT-AV1/build" install
+
+      - name: "5. Build libaom"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://aomedia.googlesource.com/aom "$SRC/aom"
+          cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TOOLS=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/aom/build" install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lstdc++ -lm -lpthread\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
+
+      - name: "6. Build libvpx"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
+          mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
+          ../libvpx/configure --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
+          make -j$(nproc) && make install
+
+      - name: "7. Build opus"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/xiph/opus.git "$SRC/opus"
+          cd "$SRC/opus" && ./autogen.sh
+          ./configure --prefix="$PREFIX" --enable-static --disable-shared --with-pic
+          make -j$(nproc) && make install
+
+      - name: "8. Build fdk-aac"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
+          cd "$SRC/fdk-aac" && ./autogen.sh
+          ./configure --prefix="$PREFIX" --enable-static --disable-shared --with-pic
+          make -j$(nproc) && make install
+
+      # --- BUILD FFMPEG CORE FOR LINUX X86_64 ---
+
+      - name: Build FFmpeg 9.0.2 Ubuntu x86_64
+        run: |
+          mkdir ffmpeg_source && cd ffmpeg_source
+          git init -q
+          git remote add origin https://github.com/FFmpeg/FFmpeg.git
+          git fetch --depth 1 origin tag n9.0.2
+          git checkout -q FETCH_HEAD
+
+          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig:$INSTALL_DIR/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+          ./configure \
+            --prefix="$INSTALL_DIR" \
+            --pkg-config=pkg-config --pkg-config-flags="--static" \
+            --extra-cflags="-I$INSTALL_DIR/include -O3 -fPIC" \
+            --extra-cxxflags="-I$INSTALL_DIR/include -O3 -fPIC" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
+            --extra-libs="-lstdc++ -lm -lz -lpthread -ldl -lrt" \
+            --enable-static --disable-shared \
+            --enable-gpl --enable-nonfree \
+            --enable-asm \
+            --enable-libx264 --enable-libx265 --enable-libsvtav1 \
+            --enable-libaom --enable-libvpx \
+            --enable-libopus --enable-libfdk-aac \
+          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; [ -f ffbuild/config.log ] && tail -n 300 ffbuild/config.log || true; exit 1; }
+
+          make -j$(nproc)
+          strip ffmpeg
+
+      # --- VERIFIKASI & PENGUJIAN ---
+
+      - name: Test FFmpeg Binary & Video Encoding
+        run: |
+          cd ffmpeg_source
+
+          echo "=== 1. TEST VERSI FFMPEG ==="
+          ./ffmpeg -version
+
+          echo "=== 2. TEST ENCODE VIDEO 1 DETIK (H.264 + AAC) ==="
+          ./ffmpeg -v error -f lavfi -i testsrc=duration=1:size=1280x720:rate=30 \
+                   -f lavfi -i sine=frequency=1000:duration=1 \
+                   -c:v libx264 -preset slow -pix_fmt yuv420p -c:a aac test_1sec.mp4
+
+          echo "=== 3. TEST DECODE VIDEO HASIL ENCODE ==="
+          ./ffmpeg -v error -i test_1sec.mp4 -f null -
+          echo "Test pemutaran 1 detik: SUKSES TANPA ERROR!"
+
+      - name: Upload Raw Ubuntu FFmpeg Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-ubuntu-x86_64
+          path: ffmpeg_source/ffmpeg
+          compression-level: 0
