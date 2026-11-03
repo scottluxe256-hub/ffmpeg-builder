@@ -174,14 +174,6 @@ jobs:
           cp -r rubberband/* "$PREFIX/include/rubberband/"
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
 
-      - name: "14. Build rnnoise"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/xiph/rnnoise.git "$SRC/rnnoise"
-          cd "$SRC/rnnoise" && ./autogen.sh
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-examples --disable-doc
-          make -j$(nproc) && make install
-
       - name: "15. Build libbs2b (Direct Compile Tanpa libsndfile)"
         run: |
           set -euxo pipefail
@@ -279,7 +271,6 @@ jobs:
             --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
             --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
             --enable-librubberband \
-            --enable-librnnoise \
             --enable-libbs2b \
             --enable-libmysofa \
             --enable-libsoxr \
@@ -306,3 +297,4 @@ jobs:
           name: ffmpeg-android-aarch64-ultra
           path: ffmpeg_source/ffmpeg_arm64_ultra.7z
           compression-level: 0
+          
