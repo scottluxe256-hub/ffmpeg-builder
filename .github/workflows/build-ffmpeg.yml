@@ -43,7 +43,7 @@ jobs:
           echo "CFLAGS=-O3 -fPIC -march=armv8-a+simd+crypto" >> $GITHUB_ENV
           echo "CXXFLAGS=-O3 -fPIC -march=armv8-a+simd+crypto" >> $GITHUB_ENV
 
-          # Wrapper symlink sesuai struktur lama yang terbukti sukses
+          # Wrapper symlink
           mkdir -p $GITHUB_WORKSPACE/bin_wrapper
           cd $GITHUB_WORKSPACE/bin_wrapper
           ln -s $TOOLCHAIN/bin/llvm-ar aarch64-linux-android-ar
@@ -55,7 +55,7 @@ jobs:
           ln -s $TOOLCHAIN/bin/llvm-strings aarch64-linux-android-strings
           echo "$GITHUB_WORKSPACE/bin_wrapper" >> $GITHUB_PATH
 
-      # --- BUILD EXTERNAL LIBRARIES (DIPISAH PER STEP) ---
+      # --- BUILD EXTERNAL LIBRARIES (18 LIBRARY) ---
 
       - name: "1. Build zlib"
         run: |
@@ -174,7 +174,7 @@ jobs:
           cp -r rubberband/* "$PREFIX/include/rubberband/"
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
 
-      - name: "15. Build libbs2b (Direct Compile Tanpa libsndfile)"
+      - name: "15. Build libbs2b"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/alexmarsev/libbs2b.git "$SRC/libbs2b"
@@ -240,7 +240,7 @@ jobs:
           ninja -C "$SRC/chromaprint/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
 
-      # --- FFMPEG ---
+      # --- FFMPEG CORE BUILD ---
 
       - name: Build FFmpeg 9.0.2
         run: |
@@ -249,6 +249,8 @@ jobs:
           git remote add origin https://github.com/FFmpeg/FFmpeg.git
           git fetch --depth 1 origin tag n9.0.2
           git checkout -q FETCH_HEAD
+
+          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
 
           ./configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
@@ -275,8 +277,8 @@ jobs:
             --enable-libmysofa \
             --enable-libsoxr \
             --enable-ladspa \
-            --enable-libchromaprint \
-          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
+            --enable-chromaprint \
+          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; [ -f ffbuild/config.log ] && tail -n 300 ffbuild/config.log || true; exit 1; }
 
           make -j$(nproc)
           $TOOLCHAIN/bin/llvm-strip ffmpeg
@@ -297,4 +299,3 @@ jobs:
           name: ffmpeg-android-aarch64-ultra
           path: ffmpeg_source/ffmpeg_arm64_ultra.7z
           compression-level: 0
-          
