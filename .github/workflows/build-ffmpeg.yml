@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-            git yasm nasm texinfo cmake ninja-build wget unzip python3 binutils
+            git yasm nasm texinfo cmake ninja-build wget unzip python3 binutils p7zip-full
 
       - name: Setup Environment & Android NDK r26b
         run: |
@@ -24,61 +24,66 @@ jobs:
           unzip -q android-ndk-r26b-linux.zip
 
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
+          SRC_DIR="$GITHUB_WORKSPACE/build_sources"
+          TOOLCHAIN="$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64"
 
+          mkdir -p "$SRC_DIR" "$INSTALL_DIR/lib/pkgconfig" "$INSTALL_DIR/include"
+
+          # Set Global Environment Variables untuk semua step di bawah
           echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
-          echo "TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "PREFIX=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "SRC=$SRC_DIR" >> $GITHUB_ENV
+          echo "HOST=aarch64-linux-android" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
+
+          echo "CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang" >> $GITHUB_ENV
+          echo "CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++" >> $GITHUB_ENV
+          echo "CFLAGS=-O3 -fPIC -march=armv8-a+simd+crypto" >> $GITHUB_ENV
+          echo "CXXFLAGS=-O3 -fPIC -march=armv8-a+simd+crypto" >> $GITHUB_ENV
 
           # Wrapper symlink sesuai struktur lama yang terbukti sukses
           mkdir -p $GITHUB_WORKSPACE/bin_wrapper
           cd $GITHUB_WORKSPACE/bin_wrapper
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar aarch64-linux-android-ar
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-as aarch64-linux-android-as
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ld aarch64-linux-android-ld
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm aarch64-linux-android-nm
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib aarch64-linux-android-ranlib
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip aarch64-linux-android-strip
-          ln -s $GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings aarch64-linux-android-strings
+          ln -s $TOOLCHAIN/bin/llvm-ar aarch64-linux-android-ar
+          ln -s $TOOLCHAIN/bin/llvm-as aarch64-linux-android-as
+          ln -s $TOOLCHAIN/bin/llvm-ld aarch64-linux-android-ld
+          ln -s $TOOLCHAIN/bin/llvm-nm aarch64-linux-android-nm
+          ln -s $TOOLCHAIN/bin/llvm-ranlib aarch64-linux-android-ranlib
+          ln -s $TOOLCHAIN/bin/llvm-strip aarch64-linux-android-strip
+          ln -s $TOOLCHAIN/bin/llvm-strings aarch64-linux-android-strings
           echo "$GITHUB_WORKSPACE/bin_wrapper" >> $GITHUB_PATH
 
-      # --- BUILD LIBRARIES ---
+      # --- BUILD EXTERNAL LIBRARIES (DIPISAH PER STEP) ---
 
-      - name: Build External Libraries
+      - name: "1. Build zlib"
         run: |
           set -euxo pipefail
-          SRC="$GITHUB_WORKSPACE/build_sources"
-          PREFIX="$INSTALL_DIR"
-          HOST="aarch64-linux-android"
-
-          mkdir -p "$SRC" "$PREFIX/lib/pkgconfig" "$PREFIX/include"
-
-          export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
-          export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
-          export CFLAGS="-O3 -fPIC -march=armv8-a+simd+crypto"
-          export CXXFLAGS="$CFLAGS"
-
-          clone() { git clone --depth 1 "$1" "$2"; }
-
-          # 1. zlib
-          clone https://github.com/madler/zlib.git "$SRC/zlib"
+          git clone --depth 1 https://github.com/madler/zlib.git "$SRC/zlib"
           cd "$SRC/zlib" && ./configure --prefix="$PREFIX" --static
           make -j$(nproc) && make install
 
-          # 2. ogg
-          clone https://github.com/xiph/ogg.git "$SRC/ogg"
+      - name: "2. Build libogg"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/xiph/ogg.git "$SRC/ogg"
           cd "$SRC/ogg" && ./autogen.sh
           ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-          # 3. x264
-          clone https://code.videolan.org/videolan/x264.git "$SRC/x264"
+      - name: "3. Build x264"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git "$SRC/x264"
           cd "$SRC/x264"
           ./configure --host="$HOST" --cross-prefix=aarch64-linux-android- --prefix="$PREFIX" --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
           make -j$(nproc) && make install
 
-          # 4. x265
-          clone https://github.com/videolan/x265.git "$SRC/x265"
+      - name: "4. Build x265"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/videolan/x265.git "$SRC/x265"
           cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
@@ -87,8 +92,10 @@ jobs:
           ninja -C "$SRC/x265/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
-          # 5. SVT-AV1
-          clone https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
+      - name: "5. Build SVT-AV1"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
@@ -96,8 +103,10 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF
           ninja -C "$SRC/SVT-AV1/build" install
 
-          # 6. libaom
-          clone https://aomedia.googlesource.com/aom "$SRC/aom"
+      - name: "6. Build libaom"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://aomedia.googlesource.com/aom "$SRC/aom"
           cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
@@ -106,40 +115,54 @@ jobs:
           ninja -C "$SRC/aom/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
-          # 7. libvpx
-          clone https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
+      - name: "7. Build libvpx"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
           mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
           ../libvpx/configure --target=arm64-android-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
           make -j$(nproc) && make install
 
-          # 8. mp3lame
-          clone https://github.com/lameproject/lame.git "$SRC/lame"
+      - name: "8. Build mp3lame"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/lameproject/lame.git "$SRC/lame"
           cd "$SRC/lame" && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
           make -j$(nproc) && make install
 
-          # 9. opus
-          clone https://github.com/xiph/opus.git "$SRC/opus"
+      - name: "9. Build opus"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/xiph/opus.git "$SRC/opus"
           cd "$SRC/opus" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-          # 10. vorbis
-          clone https://github.com/xiph/vorbis.git "$SRC/vorbis"
+      - name: "10. Build vorbis"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/xiph/vorbis.git "$SRC/vorbis"
           cd "$SRC/vorbis" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
           make -j$(nproc) && make install
 
-          # 11. libwebp
-          clone https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
+      - name: "11. Build libwebp"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
           cd "$SRC/libwebp" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
 
-          # 12. fdk-aac
-          clone https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
+      - name: "12. Build fdk-aac"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
           cd "$SRC/fdk-aac" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(nproc) && make install
 
-          # 13. rubberband (High-Quality Pitch/Tempo Shifter)
-          clone https://github.com/breakfastquay/rubberband.git "$SRC/rubberband"
+      - name: "13. Build rubberband"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/breakfastquay/rubberband.git "$SRC/rubberband"
           cd "$SRC/rubberband"
           $CXX $CXXFLAGS -I. -Isingle -c single/RubberBandSingle.cpp -o RubberBandSingle.o
           aarch64-linux-android-ar rcs "$PREFIX/lib/librubberband.a" RubberBandSingle.o
@@ -148,32 +171,46 @@ jobs:
           cp -r rubberband/* "$PREFIX/include/rubberband/"
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
 
-          # 14. rnnoise (AI Noise Reduction)
-          clone https://github.com/xiph/rnnoise.git "$SRC/rnnoise"
+      - name: "14. Build rnnoise"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/xiph/rnnoise.git "$SRC/rnnoise"
           cd "$SRC/rnnoise" && ./autogen.sh
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-examples --disable-doc
           make -j$(nproc) && make install
 
-          # 15. libbs2b (Bauer Stereophonic-to-Binaural DSP)
-          clone https://github.com/alexmarsev/libbs2b.git "$SRC/libbs2b"
-          cd "$SRC/libbs2b"
-          autoreconf -fi || true
-          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(nproc) && make install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libbs2b\nDescription: Bauer stereophonic-to-binaural DSP\nVersion: 3.1.0\nLibs: -L\${libdir} -lbs2b -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libbs2b.pc"
+      - name: "15. Build libbs2b (Direct Compile Tanpa libsndfile)"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/alexmarsev/libbs2b.git "$SRC/libbs2b"
+          cd "$SRC/libbs2b/src"
+          # Compile langsung file core C/C++ agar tidak meminta libsndfile untuk CLI tools
+          $CC $CFLAGS -I. -c bs2b.c -o bs2b.o
+          $CXX $CXXFLAGS -I. -c bs2bclass.cpp -o bs2bclass.o
+          aarch64-linux-android-ar rcs "$PREFIX/lib/libbs2b.a" bs2b.o bs2bclass.o
+          aarch64-linux-android-ranlib "$PREFIX/lib/libbs2b.a"
+          mkdir -p "$PREFIX/include/bs2b"
+          cp bs2b.h bs2bclass.h bs2btypes.h bs2bversion.h "$PREFIX/include/bs2b/"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libbs2b\nDescription: Bauer stereophonic-to-binaural DSP\nVersion: 3.1.0\nLibs: -L\${libdir} -lbs2b -lc++_static -lc++abi -lm\nCflags: -I\${includedir}/bs2b -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libbs2b.pc"
 
-          # 16. libmysofa (SOFA 3D Spatial Audio)
-          clone https://github.com/hoene/libmysofa.git "$SRC/libmysofa"
+      - name: "16. Build libmysofa"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/hoene/libmysofa.git "$SRC/libmysofa"
           cmake -G "Ninja" -S "$SRC/libmysofa" -B "$SRC/libmysofa/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
+            -DZLIB_INCLUDE_DIR="$PREFIX/include" \
             -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF
           ninja -C "$SRC/libmysofa/build" install
 
-          # 17. libsoxr (High Quality Resampler)
-          clone https://github.com/chirlu/soxr.git "$SRC/soxr"
+      - name: "17. Build libsoxr"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/chirlu/soxr.git "$SRC/soxr"
           cmake -G "Ninja" -S "$SRC/soxr" -B "$SRC/soxr/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
@@ -182,11 +219,18 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF \
             -DWITH_OPENMP=OFF -DWITH_PTHREADS=ON
           ninja -C "$SRC/soxr/build" install
+          if [ ! -f "$PREFIX/lib/pkgconfig/soxr.pc" ]; then
+            printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: soxr\nDescription: High quality, one-dimensional sample-rate conversion library\nVersion: 0.1.3\nLibs: -L\${libdir} -lsoxr -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/soxr.pc"
+          fi
 
-          # 18. ladspa (Header loader untuk plugin efek audio)
+      - name: "18. Setup LADSPA Header"
+        run: |
+          set -euxo pipefail
           curl -sSL https://raw.githubusercontent.com/swh/ladspa/master/ladspa.h -o "$PREFIX/include/ladspa.h"
 
-          # 19. chromaprint (Audio Fingerprinting)
+      - name: "19. Build chromaprint"
+        run: |
+          set -euxo pipefail
           git clone --depth 1 --recursive https://github.com/acoustid/chromaprint.git "$SRC/chromaprint"
           cmake -G "Ninja" -S "$SRC/chromaprint" -B "$SRC/chromaprint/build" \
             -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
@@ -196,9 +240,7 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DBUILD_TOOLS=OFF -DBUILD_TESTS=OFF \
             -DFFT_LIB=kissfft
           ninja -C "$SRC/chromaprint/build" install
-          if [ ! -f "$PREFIX/lib/pkgconfig/libchromaprint.pc" ] && [ ! -f "$PREFIX/lib64/pkgconfig/libchromaprint.pc" ]; then
-            printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
-          fi
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
 
       # --- FFMPEG ---
 
