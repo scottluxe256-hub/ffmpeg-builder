@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-macos-static:
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 180
 
     steps:
@@ -22,12 +22,12 @@ jobs:
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
           SRC_DIR="$GITHUB_WORKSPACE/build_sources"
 
-          mkdir -p "$SRC_DIR" "$INSTALL_DIR/lib/pkgconfig" "$INSTALL_DIR/include"
+          mkdir -p "$SRC_DIR" "$INSTALL_DIR/lib/pkgconfig" "$INSTALL_DIR/lib64/pkgconfig" "$INSTALL_DIR/include"
 
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
           echo "PREFIX=$INSTALL_DIR" >> $GITHUB_ENV
           echo "SRC=$SRC_DIR" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/share/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig:$INSTALL_DIR/share/pkgconfig" >> $GITHUB_ENV
           echo "CFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
           echo "CXXFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
           echo "LDFLAGS=-L$INSTALL_DIR/lib" >> $GITHUB_ENV
@@ -55,10 +55,10 @@ jobs:
           set -euxo pipefail
           git clone --depth 1 https://code.videolan.org/videolan/x264.git "$SRC/x264"
           cd "$SRC/x264"
-          ./configure --prefix="$PREFIX" --enable-static --enable-pic --disable-cli
+          ./configure --host=aarch64-apple-darwin --prefix="$PREFIX" --enable-static --enable-pic --disable-cli
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "4. Build x265"
+      - name: "4. Build x265 (Fixed for Apple Silicon)"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/videolan/x265.git "$SRC/x265"
@@ -69,6 +69,8 @@ jobs:
             -DENABLE_CLI=OFF \
             -DEXPORT_C_API=ON \
             -DENABLE_ASSEMBLY=OFF \
+            -DCROSS_COMPILE_ARM=1 \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/x265/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
@@ -82,6 +84,7 @@ jobs:
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_APPS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/SVT-AV1/build" install
 
@@ -96,16 +99,17 @@ jobs:
             -DENABLE_EXAMPLES=OFF \
             -DENABLE_TOOLS=OFF \
             -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/aom/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
-      - name: "7. Build libvpx"
+      - name: "7. Build libvpx (Fixed Target for Apple Silicon)"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
           mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
-          ../libvpx/configure --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
+          ../libvpx/configure --target=arm64-darwin20-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
           make -j$(sysctl -n hw.ncpu) && make install
 
       - name: "8. Build mp3lame"
@@ -240,17 +244,20 @@ jobs:
           git fetch --depth 1 origin tag n9.0.2
           git checkout -q FETCH_HEAD
 
-          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig:$INSTALL_DIR/share/pkgconfig:${PKG_CONFIG_PATH:-}"
 
           ./configure \
             --prefix="$INSTALL_DIR" \
+            --arch=arm64 --cc=clang --cxx=clang++ \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
             --extra-cflags="-I$INSTALL_DIR/include" \
             --extra-cxxflags="-I$INSTALL_DIR/include" \
-            --extra-ldflags="-L$INSTALL_DIR/lib" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
+            --extra-libs="-lc++ -lm -framework CoreFoundation -framework Security -framework VideoToolbox -framework AudioToolbox -framework CoreVideo -framework CoreMedia" \
             --enable-static --disable-shared \
             --enable-gpl --enable-nonfree \
             --enable-videotoolbox --enable-audiotoolbox \
+            --enable-neon \
             --enable-libx264 --enable-libx265 --enable-libsvtav1 \
             --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
             --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
@@ -278,7 +285,7 @@ jobs:
           otool -L ffmpeg
 
           echo "=== 3. TEST ENCODE VIDEO 1 DETIK (H.264 + AAC) ==="
-          ./ffmpeg -f lavfi -i testsrc=duration=1:size=1280x720:rate=30 \
+          ./ffmpeg -v error -f lavfi -i testsrc=duration=1:size=1280x720:rate=30 \
                    -f lavfi -i sine=frequency=1000:duration=1 \
                    -c:v libx264 -pix_fmt yuv420p -c:a aac test_1sec.mp4
 
@@ -286,7 +293,7 @@ jobs:
           ./ffmpeg -v error -i test_1sec.mp4 -f null -
           echo "Test pemutaran 1 detik: SUKSES TANPA ERROR!"
 
-          # Zip Binary untuk Distribusi
+          # Zip Binary untuk Distribusi (Hanya file FFmpeg murni)
           zip -9 ffmpeg_macos_arm64.zip ffmpeg
 
       - name: Upload macOS FFmpeg Artifact
