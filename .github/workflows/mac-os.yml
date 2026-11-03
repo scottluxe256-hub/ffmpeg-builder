@@ -33,7 +33,7 @@ jobs:
           echo "CXXFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
           echo "LDFLAGS=-L$INSTALL_DIR/lib" >> $GITHUB_ENV
 
-      # --- BUILD EXTERNAL LIBRARIES (STREAMLINED) ---
+      # --- BUILD EXTERNAL LIBRARIES (FOKUS VIDEO & CORE AUDIO) ---
 
       - name: "1. Build zlib"
         run: |
@@ -137,92 +137,6 @@ jobs:
           ./configure --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "10. Build rubberband"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/breakfastquay/rubberband.git "$SRC/rubberband"
-          cd "$SRC/rubberband"
-          clang++ $CXXFLAGS -I. -Isingle -c single/RubberBandSingle.cpp -o RubberBandSingle.o
-          ar rcs "$PREFIX/lib/librubberband.a" RubberBandSingle.o
-          ranlib "$PREFIX/lib/librubberband.a"
-          mkdir -p "$PREFIX/include/rubberband"
-          cp -r rubberband/* "$PREFIX/include/rubberband/"
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
-
-      - name: "11. Build libbs2b"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/alexmarsev/libbs2b.git "$SRC/libbs2b"
-          cd "$SRC/libbs2b/src"
-          clang $CFLAGS -I. -c bs2b.c -o bs2b.o
-          clang++ $CXXFLAGS -I. -c bs2bclass.cpp -o bs2bclass.o
-          ar rcs "$PREFIX/lib/libbs2b.a" bs2b.o bs2bclass.o
-          ranlib "$PREFIX/lib/libbs2b.a"
-          mkdir -p "$PREFIX/include/bs2b"
-          cp bs2b.h bs2bclass.h bs2btypes.h bs2bversion.h "$PREFIX/include/bs2b/"
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libbs2b\nDescription: Bauer stereophonic-to-binaural DSP\nVersion: 3.1.0\nLibs: -L\${libdir} -lbs2b -lc++ -lm\nCflags: -I\${includedir}/bs2b -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libbs2b.pc"
-
-      - name: "12. Build libmysofa"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/hoene/libmysofa.git "$SRC/libmysofa"
-          cmake -G "Ninja" -S "$SRC/libmysofa" -B "$SRC/libmysofa/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
-            -DZLIB_INCLUDE_DIR="$PREFIX/include" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TESTS=OFF \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          ninja -C "$SRC/libmysofa/build" install
-
-      - name: "13. Build libsoxr"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/chirlu/soxr.git "$SRC/soxr"
-          sed -i '' '/CMP0025/d' "$SRC/soxr/CMakeLists.txt" || true
-          sed -i '' '/CMP0054/d' "$SRC/soxr/CMakeLists.txt" || true
-          cmake -G "Ninja" -S "$SRC/soxr" -B "$SRC/soxr/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TESTS=OFF \
-            -DBUILD_EXAMPLES=OFF \
-            -DWITH_OPENMP=OFF \
-            -DWITH_PTHREADS=ON \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          ninja -C "$SRC/soxr/build" install
-          if [ ! -f "$PREFIX/lib/pkgconfig/soxr.pc" ]; then
-            printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: soxr\nDescription: High quality sample-rate conversion library\nVersion: 0.1.3\nLibs: -L\${libdir} -lsoxr -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/soxr.pc"
-          fi
-
-      - name: "14. Setup LADSPA Header"
-        run: |
-          set -euxo pipefail
-          curl -sSL https://raw.githubusercontent.com/swh/ladspa/master/ladspa.h -o "$PREFIX/include/ladspa.h"
-
-      - name: "15. Build chromaprint"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/acoustid/chromaprint.git "$SRC/chromaprint"
-          cmake -G "Ninja" -S "$SRC/chromaprint" -B "$SRC/chromaprint/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TOOLS=OFF \
-            -DBUILD_TESTS=OFF \
-            -DFFT_LIB=kissfft \
-            -DKISSFFT_SOURCE_DIR="$SRC/chromaprint/src/3rdparty/kissfft" \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          ninja -C "$SRC/chromaprint/build" install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
-
       # --- BUILD FFMPEG CORE FOR MACOS (ASM & NEON ENABLED) ---
 
       - name: Build FFmpeg 9.0.2 macOS
@@ -248,14 +162,8 @@ jobs:
             --enable-videotoolbox --enable-audiotoolbox \
             --enable-asm --enable-neon \
             --enable-libx264 --enable-libx265 --enable-libsvtav1 \
-            --enable-libaom --enable-libvpx --enable-libopus \
-            --enable-libwebp --enable-libfdk-aac \
-            --enable-librubberband \
-            --enable-libbs2b \
-            --enable-libmysofa \
-            --enable-libsoxr \
-            --enable-ladspa \
-            --enable-chromaprint \
+            --enable-libaom --enable-libvpx \
+            --enable-libopus --enable-libwebp --enable-libfdk-aac \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; [ -f ffbuild/config.log ] && tail -n 300 ffbuild/config.log || true; exit 1; }
 
           make -j$(sysctl -n hw.ncpu)
