@@ -1,23 +1,23 @@
-name: Test Build FFmpeg macOS ARM64 (Only libvvenc)
+name: Build FFmpeg Static macOS ARM64
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-macos-vvenc:
+  build-macos-static:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 180
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies via Homebrew
+      - name: Install Build Dependencies (Homebrew)
         run: |
           brew update
-          brew install automake autoconf libtool pkg-config yasm nasm texinfo cmake ninja
+          brew install autoconf automake libtool pkg-config nasm yasm cmake ninja
 
-      - name: Setup Environment macOS ARM64
+      - name: Setup Environment Variables
         run: |
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
           SRC_DIR="$GITHUB_WORKSPACE/build_sources"
@@ -27,36 +27,212 @@ jobs:
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
           echo "PREFIX=$INSTALL_DIR" >> $GITHUB_ENV
           echo "SRC=$SRC_DIR" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
-          echo "JOBS=$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
-
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "CXX=clang++" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/share/pkgconfig" >> $GITHUB_ENV
           echo "CFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
           echo "CXXFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
+          echo "LDFLAGS=-L$INSTALL_DIR/lib" >> $GITHUB_ENV
 
-      # --- 1. BUILD HANYA LIBVVENC (FRAUNHOFER H.266/VVC) ---
+      # --- BUILD 18 EXTERNAL LIBRARIES ---
 
-      - name: "Build libvvenc"
+      - name: "1. Build zlib"
         run: |
           set -euxo pipefail
-          git clone --depth 1 https://github.com/fraunhoferhhi/vvenc.git "$SRC/vvenc"
-          cmake -G "Ninja" -S "$SRC/vvenc" -B "$SRC/vvenc/build" \
+          git clone --depth 1 https://github.com/madler/zlib.git "$SRC/zlib"
+          cd "$SRC/zlib"
+          ./configure --prefix="$PREFIX" --static
+          make -j$(sysctl -n hw.ncpu) && make install
+
+      - name: "2. Build libogg"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/xiph/ogg.git "$SRC/ogg"
+          cd "$SRC/ogg" && ./autogen.sh
+          ./configure --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(sysctl -n hw.ncpu) && make install
+
+      - name: "3. Build x264"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git "$SRC/x264"
+          cd "$SRC/x264"
+          ./configure --prefix="$PREFIX" --enable-static --enable-pic --disable-cli
+          make -j$(sysctl -n hw.ncpu) && make install
+
+      - name: "4. Build x265"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/videolan/x265.git "$SRC/x265"
+          cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_CLI=OFF \
+            -DEXPORT_C_API=ON \
+            -DENABLE_ASSEMBLY=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/x265/build" install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
+
+      - name: "5. Build SVT-AV1"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
+          cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DBUILD_SHARED_LIBS=OFF \
-            -DVVENC_ENABLE_LINK_TIME_OPT=OFF \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_APPS=OFF \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          ninja -C "$SRC/vvenc/build" install
+          ninja -C "$SRC/SVT-AV1/build" install
 
-          # Verifikasi file library dan pkg-config
-          ls -la "$PREFIX/lib"
-          cat "$PREFIX/lib/pkgconfig/libvvenc.pc" || true
+      - name: "6. Build libaom"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://aomedia.googlesource.com/aom "$SRC/aom"
+          cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TOOLS=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/aom/build" install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
-      # --- 2. COMPILE FFMPEG DENGAN LIBVVENC ---
+      - name: "7. Build libvpx"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
+          mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
+          ../libvpx/configure --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
+          make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "Build FFmpeg 9.0.2 (H266 Only)"
+      - name: "8. Build mp3lame"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/lameproject/lame.git "$SRC/lame"
+          cd "$SRC/lame"
+          ./configure --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
+          make -j$(sysctl -n hw.ncpu) && make install
+
+      - name: "9. Build opus"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/xiph/opus.git "$SRC/opus"
+          cd "$SRC/opus" && ./autogen.sh
+          ./configure --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(sysctl -n hw.ncpu) && make install
+
+      - name: "10. Build vorbis"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/xiph/vorbis.git "$SRC/vorbis"
+          cd "$SRC/vorbis" && ./autogen.sh
+          ./configure --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
+          make -j$(sysctl -n hw.ncpu) && make install
+
+      - name: "11. Build libwebp"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
+          cd "$SRC/libwebp" && ./autogen.sh
+          ./configure --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(sysctl -n hw.ncpu) && make install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
+
+      - name: "12. Build fdk-aac"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
+          cd "$SRC/fdk-aac" && ./autogen.sh
+          ./configure --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(sysctl -n hw.ncpu) && make install
+
+      - name: "13. Build rubberband"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/breakfastquay/rubberband.git "$SRC/rubberband"
+          cd "$SRC/rubberband"
+          clang++ $CXXFLAGS -I. -Isingle -c single/RubberBandSingle.cpp -o RubberBandSingle.o
+          ar rcs "$PREFIX/lib/librubberband.a" RubberBandSingle.o
+          ranlib "$PREFIX/lib/librubberband.a"
+          mkdir -p "$PREFIX/include/rubberband"
+          cp -r rubberband/* "$PREFIX/include/rubberband/"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
+
+      - name: "15. Build libbs2b"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/alexmarsev/libbs2b.git "$SRC/libbs2b"
+          cd "$SRC/libbs2b/src"
+          clang $CFLAGS -I. -c bs2b.c -o bs2b.o
+          clang++ $CXXFLAGS -I. -c bs2bclass.cpp -o bs2bclass.o
+          ar rcs "$PREFIX/lib/libbs2b.a" bs2b.o bs2bclass.o
+          ranlib "$PREFIX/lib/libbs2b.a"
+          mkdir -p "$PREFIX/include/bs2b"
+          cp bs2b.h bs2bclass.h bs2btypes.h bs2bversion.h "$PREFIX/include/bs2b/"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libbs2b\nDescription: Bauer stereophonic-to-binaural DSP\nVersion: 3.1.0\nLibs: -L\${libdir} -lbs2b -lc++ -lm\nCflags: -I\${includedir}/bs2b -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libbs2b.pc"
+
+      - name: "16. Build libmysofa"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/hoene/libmysofa.git "$SRC/libmysofa"
+          cmake -G "Ninja" -S "$SRC/libmysofa" -B "$SRC/libmysofa/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
+            -DZLIB_INCLUDE_DIR="$PREFIX/include" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/libmysofa/build" install
+
+      - name: "17. Build libsoxr"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/chirlu/soxr.git "$SRC/soxr"
+          cmake -G "Ninja" -S "$SRC/soxr" -B "$SRC/soxr/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DWITH_OPENMP=OFF \
+            -DWITH_PTHREADS=ON \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/soxr/build" install
+          if [ ! -f "$PREFIX/lib/pkgconfig/soxr.pc" ]; then
+            printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: soxr\nDescription: High quality sample-rate conversion library\nVersion: 0.1.3\nLibs: -L\${libdir} -lsoxr -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/soxr.pc"
+          fi
+
+      - name: "18. Setup LADSPA Header"
+        run: |
+          set -euxo pipefail
+          curl -sSL https://raw.githubusercontent.com/swh/ladspa/master/ladspa.h -o "$PREFIX/include/ladspa.h"
+
+      - name: "19. Build chromaprint"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/acoustid/chromaprint.git "$SRC/chromaprint"
+          cmake -G "Ninja" -S "$SRC/chromaprint" -B "$SRC/chromaprint/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TOOLS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DFFT_LIB=kissfft \
+            -DKISSFFT_SOURCE_DIR="$SRC/chromaprint/src/3rdparty/kissfft" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/chromaprint/build" install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
+
+      # --- BUILD FFMPEG CORE FOR MACOS ---
+
+      - name: Build FFmpeg 9.0.2 macOS
         run: |
           mkdir ffmpeg_source && cd ffmpeg_source
           git init -q
@@ -64,49 +240,58 @@ jobs:
           git fetch --depth 1 origin tag n9.0.2
           git checkout -q FETCH_HEAD
 
+          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+
           ./configure \
-            --cc=clang \
-            --cxx=clang++ \
+            --prefix="$INSTALL_DIR" \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
-            --extra-cflags="-I$INSTALL_DIR/include -fPIC -arch arm64" \
-            --extra-cxxflags="-I$INSTALL_DIR/include -fPIC -arch arm64" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -arch arm64" \
-            --extra-libs="-lc++ -lm -ldl -lz -lpthread -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework CoreServices" \
-            --prefix=$INSTALL_DIR \
+            --extra-cflags="-I$INSTALL_DIR/include" \
+            --extra-cxxflags="-I$INSTALL_DIR/include" \
+            --extra-ldflags="-L$INSTALL_DIR/lib" \
             --enable-static --disable-shared \
-            --enable-asm --enable-neon \
-            --enable-gpl \
-            --enable-libvvenc \
-          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
+            --enable-gpl --enable-nonfree \
+            --enable-videotoolbox --enable-audiotoolbox \
+            --enable-libx264 --enable-libx265 --enable-libsvtav1 \
+            --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
+            --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
+            --enable-librubberband \
+            --enable-libbs2b \
+            --enable-libmysofa \
+            --enable-libsoxr \
+            --enable-ladspa \
+            --enable-chromaprint \
+          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; [ -f ffbuild/config.log ] && tail -n 300 ffbuild/config.log || true; exit 1; }
 
-          make -j$JOBS
-          strip -x ffmpeg
+          make -j$(sysctl -n hw.ncpu)
+          strip -u -r ffmpeg
 
-      # --- 3. VERIFIKASI & TEST ENCODE LANGSUNG ---
+      # --- VERIFIKASI & PENGUJIAN ---
 
-      - name: "Verifikasi Versi & Encoder libvvenc"
+      - name: Test FFmpeg Binary & Video Encoding
         run: |
           cd ffmpeg_source
-          file ffmpeg
-          echo -e "\n=== Version ==="
+
+          echo "=== 1. TEST VERSI FFMPEG ==="
           ./ffmpeg -version
-          echo -e "\n=== Cek Ketersediaan Encoder VVC / H.266 ==="
-          ./ffmpeg -encoders | grep -i vvenc
 
-      - name: "Smoke Test Encode VVC (1 Detik Video Sintetis)"
-        run: |
-          cd ffmpeg_source
-          echo "🚀 Menjalankan uji render 1 detik video sintetis H.266/VVC..."
-          ./ffmpeg -v error \
-            -f lavfi -i testsrc=duration=1:size=320x240:rate=30 \
-            -c:v libvvenc -preset faster -qp 32 \
-            -y test_output_vvc.mp4
+          echo "=== 2. CEK LINKED DYLIB (STANDALONE CHECK) ==="
+          otool -L ffmpeg
 
-          echo "✅ Encode VVC Berhasil 100%!"
-          ls -lh test_output_vvc.mp4
+          echo "=== 3. TEST ENCODE VIDEO 1 DETIK (H.264 + AAC) ==="
+          ./ffmpeg -f lavfi -i testsrc=duration=1:size=1280x720:rate=30 \
+                   -f lavfi -i sine=frequency=1000:duration=1 \
+                   -c:v libx264 -pix_fmt yuv420p -c:a aac test_1sec.mp4
 
-      - name: "Upload Artifact Biner FFmpeg"
+          echo "=== 4. TEST DECODE VIDEO HASIL ENCODE ==="
+          ./ffmpeg -v error -i test_1sec.mp4 -f null -
+          echo "Test pemutaran 1 detik: SUKSES TANPA ERROR!"
+
+          # Zip Binary untuk Distribusi
+          zip -9 ffmpeg_macos_arm64.zip ffmpeg
+
+      - name: Upload macOS FFmpeg Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-macos-arm64-vvenc-only
-          path: ffmpeg_source/ffmpeg
+          name: ffmpeg-macos-arm64
+          path: ffmpeg_source/ffmpeg_macos_arm64.zip
+          compression-level: 0
