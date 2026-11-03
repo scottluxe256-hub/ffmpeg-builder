@@ -33,7 +33,7 @@ jobs:
           echo "CXXFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
           echo "LDFLAGS=-L$INSTALL_DIR/lib" >> $GITHUB_ENV
 
-      # --- BUILD 18 EXTERNAL LIBRARIES (ASSEMBLY ENABLED) ---
+      # --- BUILD 18 EXTERNAL LIBRARIES ---
 
       - name: "1. Build zlib"
         run: |
@@ -59,10 +59,18 @@ jobs:
           ./configure --host=aarch64-apple-darwin --prefix="$PREFIX" --enable-static --enable-pic --disable-cli
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "4. Build x265 (Assembly ON untuk Apple Silicon)"
+      - name: "4. Build x265 (Official v4.3 - Assembly ON)"
         run: |
           set -euxo pipefail
-          git clone https://github.com/videolan/x265.git "$SRC/x265"
+          # Unduh rilis resmi x265 versi 4.3 dari MulticoreWare
+          curl -sSL "https://github.com/Multicorewareinc/x265/releases/download/4.3/x265_4.3.tar.gz" -o x265_4.3.tar.gz
+          mkdir -p "$SRC/x265"
+          tar -xzf x265_4.3.tar.gz -C "$SRC/x265" --strip-components=1
+
+          # Bersihkan aturan kebijakan CMake usang agar kompatibel dengan CMake 4.4.3
+          sed -i '' '/CMP0025/d' "$SRC/x265/source/CMakeLists.txt"
+          sed -i '' '/CMP0054/d' "$SRC/x265/source/CMakeLists.txt"
+
           cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_INSTALL_LIBDIR=lib \
@@ -70,9 +78,10 @@ jobs:
             -DENABLE_CLI=OFF \
             -DEXPORT_C_API=ON \
             -DENABLE_ASSEMBLY=ON \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/x265/build" install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 4.3\nLibs: -L\${libdir} -lx265 -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
       - name: "5. Build SVT-AV1"
         run: |
@@ -84,7 +93,8 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_APPS=OFF \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/SVT-AV1/build" install
 
       - name: "6. Build libaom"
@@ -99,7 +109,8 @@ jobs:
             -DENABLE_TOOLS=OFF \
             -DBUILD_SHARED_LIBS=OFF \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/aom/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
@@ -189,13 +200,16 @@ jobs:
             -DZLIB_INCLUDE_DIR="$PREFIX/include" \
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_TESTS=OFF \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/libmysofa/build" install
 
       - name: "17. Build libsoxr"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/chirlu/soxr.git "$SRC/soxr"
+          sed -i '' '/CMP0025/d' "$SRC/soxr/CMakeLists.txt" || true
+          sed -i '' '/CMP0054/d' "$SRC/soxr/CMakeLists.txt" || true
           cmake -G "Ninja" -S "$SRC/soxr" -B "$SRC/soxr/build" \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_INSTALL_LIBDIR=lib \
@@ -205,7 +219,8 @@ jobs:
             -DBUILD_EXAMPLES=OFF \
             -DWITH_OPENMP=OFF \
             -DWITH_PTHREADS=ON \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/soxr/build" install
           if [ ! -f "$PREFIX/lib/pkgconfig/soxr.pc" ]; then
             printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: soxr\nDescription: High quality sample-rate conversion library\nVersion: 0.1.3\nLibs: -L\${libdir} -lsoxr -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/soxr.pc"
@@ -229,7 +244,8 @@ jobs:
             -DBUILD_TESTS=OFF \
             -DFFT_LIB=kissfft \
             -DKISSFFT_SOURCE_DIR="$SRC/chromaprint/src/3rdparty/kissfft" \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/chromaprint/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
 
@@ -295,4 +311,3 @@ jobs:
           name: ffmpeg-macos-arm64
           path: ffmpeg_source/ffmpeg
           compression-level: 0
-          
