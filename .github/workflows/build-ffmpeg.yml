@@ -1,90 +1,108 @@
-name: Build FFmpeg Static macOS ARM64
+name: Build FFmpeg Static Android ARM64
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-macos-static:
-    runs-on: macos-15
+  build-android-static:
+    runs-on: ubuntu-latest
     timeout-minutes: 180
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies (Homebrew)
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
+      - name: Install Build Dependencies
         run: |
-          brew install autoconf automake libtool pkg-config nasm yasm
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
+            git yasm nasm texinfo cmake ninja-build wget unzip python3 binutils p7zip-full
 
-      - name: Setup Environment Variables
+      - name: Setup Environment & Android NDK r26b
         run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+
           INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
           SRC_DIR="$GITHUB_WORKSPACE/build_sources"
+          TOOLCHAIN="$GITHUB_WORKSPACE/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64"
 
-          mkdir -p "$SRC_DIR" "$INSTALL_DIR/lib/pkgconfig" "$INSTALL_DIR/lib64/pkgconfig" "$INSTALL_DIR/include"
+          mkdir -p "$SRC_DIR" "$INSTALL_DIR/lib/pkgconfig" "$INSTALL_DIR/include"
 
+          # Set Global Environment Variables untuk semua step di bawah
+          echo "NDK_PATH=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
           echo "PREFIX=$INSTALL_DIR" >> $GITHUB_ENV
           echo "SRC=$SRC_DIR" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig:$INSTALL_DIR/share/pkgconfig" >> $GITHUB_ENV
-          echo "CFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
-          echo "CXXFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
-          echo "LDFLAGS=-L$INSTALL_DIR/lib" >> $GITHUB_ENV
+          echo "HOST=aarch64-linux-android" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
 
-      # --- BUILD 18 EXTERNAL LIBRARIES (ASSEMBLY ENABLED) ---
+          echo "CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang" >> $GITHUB_ENV
+          echo "CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++" >> $GITHUB_ENV
+          echo "CFLAGS=-O3 -fPIC -march=armv8-a+simd+crypto" >> $GITHUB_ENV
+          echo "CXXFLAGS=-O3 -fPIC -march=armv8-a+simd+crypto" >> $GITHUB_ENV
+
+          # Wrapper symlink
+          mkdir -p $GITHUB_WORKSPACE/bin_wrapper
+          cd $GITHUB_WORKSPACE/bin_wrapper
+          ln -s $TOOLCHAIN/bin/llvm-ar aarch64-linux-android-ar
+          ln -s $TOOLCHAIN/bin/llvm-as aarch64-linux-android-as
+          ln -s $TOOLCHAIN/bin/llvm-ld aarch64-linux-android-ld
+          ln -s $TOOLCHAIN/bin/llvm-nm aarch64-linux-android-nm
+          ln -s $TOOLCHAIN/bin/llvm-ranlib aarch64-linux-android-ranlib
+          ln -s $TOOLCHAIN/bin/llvm-strip aarch64-linux-android-strip
+          ln -s $TOOLCHAIN/bin/llvm-strings aarch64-linux-android-strings
+          echo "$GITHUB_WORKSPACE/bin_wrapper" >> $GITHUB_PATH
+
+      # --- BUILD EXTERNAL LIBRARIES (18 LIBRARY) ---
 
       - name: "1. Build zlib"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/madler/zlib.git "$SRC/zlib"
-          cd "$SRC/zlib"
-          ./configure --prefix="$PREFIX" --static
-          make -j$(sysctl -n hw.ncpu) && make install
+          cd "$SRC/zlib" && ./configure --prefix="$PREFIX" --static
+          make -j$(nproc) && make install
 
       - name: "2. Build libogg"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/xiph/ogg.git "$SRC/ogg"
           cd "$SRC/ogg" && ./autogen.sh
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(sysctl -n hw.ncpu) && make install
+          ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
 
-      - name: "3. Build x264 (NEON Auto-Enabled)"
+      - name: "3. Build x264"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://code.videolan.org/videolan/x264.git "$SRC/x264"
           cd "$SRC/x264"
-          ./configure --host=aarch64-apple-darwin --prefix="$PREFIX" --enable-static --enable-pic --disable-cli
-          make -j$(sysctl -n hw.ncpu) && make install
+          ./configure --host="$HOST" --cross-prefix=aarch64-linux-android- --prefix="$PREFIX" --enable-static --enable-pic --disable-cli --sysroot=$TOOLCHAIN/sysroot
+          make -j$(nproc) && make install
 
-      - name: "4. Build x265 (Assembly ON untuk Apple Silicon)"
+      - name: "4. Build x265"
         run: |
           set -euxo pipefail
-          git clone https://github.com/videolan/x265.git "$SRC/x265"
+          git clone --depth 1 https://github.com/videolan/x265.git "$SRC/x265"
           cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DENABLE_SHARED=OFF \
-            -DENABLE_CLI=OFF \
-            -DEXPORT_C_API=ON \
-            -DENABLE_ASSEMBLY=ON \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DEXPORT_C_API=ON -DENABLE_ASSEMBLY=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/x265/build" install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
       - name: "5. Build SVT-AV1"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
           cmake -G "Ninja" -S "$SRC/SVT-AV1" -B "$SRC/SVT-AV1/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_APPS=OFF \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/SVT-AV1/build" install
 
       - name: "6. Build libaom"
@@ -92,104 +110,96 @@ jobs:
           set -euxo pipefail
           git clone --depth 1 https://aomedia.googlesource.com/aom "$SRC/aom"
           cmake -G "Ninja" -S "$SRC/aom" -B "$SRC/aom/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_EXAMPLES=OFF \
-            -DENABLE_TOOLS=OFF \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TOOLS=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/aom/build" install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
       - name: "7. Build libvpx"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
           mkdir -p "$SRC/libvpx-b" && cd "$SRC/libvpx-b"
-          ../libvpx/configure --target=arm64-darwin20-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
-          make -j$(sysctl -n hw.ncpu) && make install
+          ../libvpx/configure --target=arm64-android-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
+          make -j$(nproc) && make install
 
       - name: "8. Build mp3lame"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/lameproject/lame.git "$SRC/lame"
-          cd "$SRC/lame"
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
-          make -j$(sysctl -n hw.ncpu) && make install
+          cd "$SRC/lame" && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
+          make -j$(nproc) && make install
 
       - name: "9. Build opus"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/xiph/opus.git "$SRC/opus"
-          cd "$SRC/opus" && ./autogen.sh
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(sysctl -n hw.ncpu) && make install
+          cd "$SRC/opus" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
 
       - name: "10. Build vorbis"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/xiph/vorbis.git "$SRC/vorbis"
-          cd "$SRC/vorbis" && ./autogen.sh
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
-          make -j$(sysctl -n hw.ncpu) && make install
+          cd "$SRC/vorbis" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
+          make -j$(nproc) && make install
 
       - name: "11. Build libwebp"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
-          cd "$SRC/libwebp" && ./autogen.sh
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(sysctl -n hw.ncpu) && make install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
+          cd "$SRC/libwebp" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
 
       - name: "12. Build fdk-aac"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
-          cd "$SRC/fdk-aac" && ./autogen.sh
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(sysctl -n hw.ncpu) && make install
+          cd "$SRC/fdk-aac" && ./autogen.sh && ./configure --host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared
+          make -j$(nproc) && make install
 
       - name: "13. Build rubberband"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/breakfastquay/rubberband.git "$SRC/rubberband"
           cd "$SRC/rubberband"
-          clang++ $CXXFLAGS -I. -Isingle -c single/RubberBandSingle.cpp -o RubberBandSingle.o
-          ar rcs "$PREFIX/lib/librubberband.a" RubberBandSingle.o
-          ranlib "$PREFIX/lib/librubberband.a"
+          $CXX $CXXFLAGS -I. -Isingle -c single/RubberBandSingle.cpp -o RubberBandSingle.o
+          aarch64-linux-android-ar rcs "$PREFIX/lib/librubberband.a" RubberBandSingle.o
+          aarch64-linux-android-ranlib "$PREFIX/lib/librubberband.a"
           mkdir -p "$PREFIX/include/rubberband"
           cp -r rubberband/* "$PREFIX/include/rubberband/"
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
 
       - name: "15. Build libbs2b"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/alexmarsev/libbs2b.git "$SRC/libbs2b"
           cd "$SRC/libbs2b/src"
-          clang $CFLAGS -I. -c bs2b.c -o bs2b.o
-          clang++ $CXXFLAGS -I. -c bs2bclass.cpp -o bs2bclass.o
-          ar rcs "$PREFIX/lib/libbs2b.a" bs2b.o bs2bclass.o
-          ranlib "$PREFIX/lib/libbs2b.a"
+          $CC $CFLAGS -I. -c bs2b.c -o bs2b.o
+          $CXX $CXXFLAGS -I. -c bs2bclass.cpp -o bs2bclass.o
+          aarch64-linux-android-ar rcs "$PREFIX/lib/libbs2b.a" bs2b.o bs2bclass.o
+          aarch64-linux-android-ranlib "$PREFIX/lib/libbs2b.a"
           mkdir -p "$PREFIX/include/bs2b"
           cp bs2b.h bs2bclass.h bs2btypes.h bs2bversion.h "$PREFIX/include/bs2b/"
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libbs2b\nDescription: Bauer stereophonic-to-binaural DSP\nVersion: 3.1.0\nLibs: -L\${libdir} -lbs2b -lc++ -lm\nCflags: -I\${includedir}/bs2b -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libbs2b.pc"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libbs2b\nDescription: Bauer stereophonic-to-binaural DSP\nVersion: 3.1.0\nLibs: -L\${libdir} -lbs2b -lc++_static -lc++abi -lm\nCflags: -I\${includedir}/bs2b -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libbs2b.pc"
 
       - name: "16. Build libmysofa"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/hoene/libmysofa.git "$SRC/libmysofa"
           cmake -G "Ninja" -S "$SRC/libmysofa" -B "$SRC/libmysofa/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
             -DZLIB_INCLUDE_DIR="$PREFIX/include" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TESTS=OFF \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/libmysofa/build" install
 
       - name: "17. Build libsoxr"
@@ -197,18 +207,16 @@ jobs:
           set -euxo pipefail
           git clone --depth 1 https://github.com/chirlu/soxr.git "$SRC/soxr"
           cmake -G "Ninja" -S "$SRC/soxr" -B "$SRC/soxr/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TESTS=OFF \
-            -DBUILD_EXAMPLES=OFF \
-            -DWITH_OPENMP=OFF \
-            -DWITH_PTHREADS=ON \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+            -DWITH_OPENMP=OFF -DWITH_PTHREADS=ON \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/soxr/build" install
           if [ ! -f "$PREFIX/lib/pkgconfig/soxr.pc" ]; then
-            printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: soxr\nDescription: High quality sample-rate conversion library\nVersion: 0.1.3\nLibs: -L\${libdir} -lsoxr -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/soxr.pc"
+            printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: soxr\nDescription: High quality, one-dimensional sample-rate conversion library\nVersion: 0.1.3\nLibs: -L\${libdir} -lsoxr -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/soxr.pc"
           fi
 
       - name: "18. Setup LADSPA Header"
@@ -221,21 +229,20 @@ jobs:
           set -euxo pipefail
           git clone --depth 1 https://github.com/acoustid/chromaprint.git "$SRC/chromaprint"
           cmake -G "Ninja" -S "$SRC/chromaprint" -B "$SRC/chromaprint/build" \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TOOLS=OFF \
-            -DBUILD_TESTS=OFF \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_TOOLS=OFF -DBUILD_TESTS=OFF \
             -DFFT_LIB=kissfft \
             -DKISSFFT_SOURCE_DIR="$SRC/chromaprint/src/3rdparty/kissfft" \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/chromaprint/build" install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
+          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libchromaprint\nDescription: Audio fingerprinting library\nVersion: 1.5.1\nLibs: -L\${libdir} -lchromaprint -lc++_static -lc++abi -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libchromaprint.pc"
 
-      # --- BUILD FFMPEG CORE FOR MACOS (ASM & NEON ENABLED) ---
+      # --- FFMPEG CORE BUILD ---
 
-      - name: Build FFmpeg 9.0.2 macOS
+      - name: Build FFmpeg 9.0.2
         run: |
           mkdir ffmpeg_source && cd ffmpeg_source
           git init -q
@@ -243,20 +250,25 @@ jobs:
           git fetch --depth 1 origin tag n9.0.2
           git checkout -q FETCH_HEAD
 
-          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig:$INSTALL_DIR/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PKG_CONFIG_PATH="$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
 
           ./configure \
-            --prefix="$INSTALL_DIR" \
-            --arch=arm64 --cc=clang --cxx=clang++ \
+            --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
+            --cc=$TOOLCHAIN/bin/aarch64-linux-android29-clang \
+            --cxx=$TOOLCHAIN/bin/aarch64-linux-android29-clang++ \
+            --ar=aarch64-linux-android-ar \
+            --ranlib=aarch64-linux-android-ranlib \
+            --strip=aarch64-linux-android-strip \
             --pkg-config=pkg-config --pkg-config-flags="--static" \
-            --extra-cflags="-I$INSTALL_DIR/include" \
-            --extra-cxxflags="-I$INSTALL_DIR/include" \
-            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64" \
-            --extra-libs="-lc++ -lm -framework CoreFoundation -framework Security -framework VideoToolbox -framework AudioToolbox -framework CoreVideo -framework CoreMedia" \
+            --extra-cflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-cxxflags="-I$INSTALL_DIR/include -fPIC" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -L$INSTALL_DIR/lib64 -static-libstdc++" \
+            --extra-libs="-lc++_static -lc++abi -lm -ldl -lz -llog -landroid -pthread" \
+            --prefix=$INSTALL_DIR \
             --enable-static --disable-shared \
-            --enable-gpl --enable-nonfree \
-            --enable-videotoolbox --enable-audiotoolbox \
             --enable-asm --enable-neon \
+            --enable-gpl --enable-nonfree \
+            --enable-jni --enable-mediacodec \
             --enable-libx264 --enable-libx265 --enable-libsvtav1 \
             --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
             --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
@@ -268,30 +280,22 @@ jobs:
             --enable-chromaprint \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; [ -f ffbuild/config.log ] && tail -n 300 ffbuild/config.log || true; exit 1; }
 
-          make -j$(sysctl -n hw.ncpu)
-          strip -u -r ffmpeg
+          make -j$(nproc)
+          $TOOLCHAIN/bin/llvm-strip ffmpeg
 
-      # --- VERIFIKASI & PENGUJIAN ---
+          # Kompresi 7z Super Kecil (Ultra Compression - LZMA2)
+          7z a -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on ffmpeg_arm64_ultra.7z ffmpeg
 
-      - name: Test FFmpeg Binary & Video Encoding
+      - name: Verify Binary Dependencies
         run: |
           cd ffmpeg_source
+          file ffmpeg
+          echo "---- NEEDED shared libraries ----"
+          $TOOLCHAIN/bin/llvm-readelf -d ffmpeg | grep -E "NEEDED|SONAME" || true
 
-          echo "=== 1. TEST VERSI FFMPEG ==="
-          ./ffmpeg -version
-
-          echo "=== 2. TEST ENCODE VIDEO 1 DETIK (H.264 + AAC) ==="
-          ./ffmpeg -v error -f lavfi -i testsrc=duration=1:size=1280x720:rate=30 \
-                   -f lavfi -i sine=frequency=1000:duration=1 \
-                   -c:v libx264 -preset slow -pix_fmt yuv420p -c:a aac test_1sec.mp4
-
-          echo "=== 3. TEST DECODE VIDEO HASIL ENCODE ==="
-          ./ffmpeg -v error -i test_1sec.mp4 -f null -
-          echo "Test pemutaran 1 detik: SUKSES TANPA ERROR!"
-
-      - name: Upload Raw macOS FFmpeg Binary
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-macos-arm64
-          path: ffmpeg_source/ffmpeg
+          name: ffmpeg-android-aarch64-ultra
+          path: ffmpeg_source/ffmpeg_arm64_ultra.7z
           compression-level: 0
