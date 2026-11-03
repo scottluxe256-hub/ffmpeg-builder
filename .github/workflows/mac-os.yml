@@ -120,16 +120,7 @@ jobs:
           ./configure --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "8. Build libwebp"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
-          cd "$SRC/libwebp" && ./autogen.sh
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(sysctl -n hw.ncpu) && make install
-          printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
-
-      - name: "9. Build fdk-aac"
+      - name: "8. Build fdk-aac"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
@@ -163,7 +154,7 @@ jobs:
             --enable-asm --enable-neon \
             --enable-libx264 --enable-libx265 --enable-libsvtav1 \
             --enable-libaom --enable-libvpx \
-            --enable-libopus --enable-libwebp --enable-libfdk-aac \
+            --enable-libopus --enable-libfdk-aac \
           || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; [ -f ffbuild/config.log ] && tail -n 300 ffbuild/config.log || true; exit 1; }
 
           make -j$(sysctl -n hw.ncpu)
