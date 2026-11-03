@@ -59,10 +59,11 @@ jobs:
           ./configure --host=aarch64-apple-darwin --prefix="$PREFIX" --enable-static --enable-pic --disable-cli
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "4. Build x265 (Fixed for Apple Silicon)"
+      - name: "4. Build x265 (Fixed Version Check)"
         run: |
           set -euxo pipefail
-          git clone --depth 1 https://github.com/videolan/x265.git "$SRC/x265"
+          # --depth 1 dihapus agar CMake x265 bisa membaca Git Tags versinya
+          git clone https://github.com/videolan/x265.git "$SRC/x265"
           cmake -G "Ninja" -S "$SRC/x265/source" -B "$SRC/x265/build" \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_INSTALL_LIBDIR=lib \
@@ -75,7 +76,7 @@ jobs:
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/x265/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 3.5\nLibs: -L\${libdir} -lx265 -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
-
+          
       - name: "5. Build SVT-AV1"
         run: |
           set -euxo pipefail
