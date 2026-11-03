@@ -1,0 +1,112 @@
+name: Test Build FFmpeg macOS ARM64 (Only libvvenc)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-macos-vvenc:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies via Homebrew
+        run: |
+          brew update
+          brew install automake autoconf libtool pkg-config yasm nasm texinfo cmake ninja
+
+      - name: Setup Environment macOS ARM64
+        run: |
+          INSTALL_DIR="$GITHUB_WORKSPACE/build_assets"
+          SRC_DIR="$GITHUB_WORKSPACE/build_sources"
+
+          mkdir -p "$SRC_DIR" "$INSTALL_DIR/lib/pkgconfig" "$INSTALL_DIR/include"
+
+          echo "INSTALL_DIR=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "PREFIX=$INSTALL_DIR" >> $GITHUB_ENV
+          echo "SRC=$SRC_DIR" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$INSTALL_DIR/lib/pkgconfig:$INSTALL_DIR/lib64/pkgconfig" >> $GITHUB_ENV
+          echo "JOBS=$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
+
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+          echo "CFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
+          echo "CXXFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
+
+      # --- 1. BUILD HANYA LIBVVENC (FRAUNHOFER H.266/VVC) ---
+
+      - name: "Build libvvenc"
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/fraunhoferhhi/vvenc.git "$SRC/vvenc"
+          cmake -G "Ninja" -S "$SRC/vvenc" -B "$SRC/vvenc/build" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DVVENC_ENABLE_LINK_TIME_OPT=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          ninja -C "$SRC/vvenc/build" install
+
+          # Verifikasi file library dan pkg-config
+          ls -la "$PREFIX/lib"
+          cat "$PREFIX/lib/pkgconfig/libvvenc.pc" || true
+
+      # --- 2. COMPILE FFMPEG DENGAN LIBVVENC ---
+
+      - name: "Build FFmpeg 9.0.2 (H266 Only)"
+        run: |
+          mkdir ffmpeg_source && cd ffmpeg_source
+          git init -q
+          git remote add origin https://github.com/FFmpeg/FFmpeg.git
+          git fetch --depth 1 origin tag n9.0.2
+          git checkout -q FETCH_HEAD
+
+          ./configure \
+            --cc=clang \
+            --cxx=clang++ \
+            --pkg-config=pkg-config --pkg-config-flags="--static" \
+            --extra-cflags="-I$INSTALL_DIR/include -fPIC -arch arm64" \
+            --extra-cxxflags="-I$INSTALL_DIR/include -fPIC -arch arm64" \
+            --extra-ldflags="-L$INSTALL_DIR/lib -arch arm64" \
+            --extra-libs="-lc++ -lm -ldl -lz -lpthread -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework CoreServices" \
+            --prefix=$INSTALL_DIR \
+            --enable-static --disable-shared \
+            --enable-asm --enable-neon \
+            --enable-gpl \
+            --enable-libvvenc \
+          || { echo "----- ffbuild/config.log (300 baris terakhir) -----"; tail -n 300 ffbuild/config.log; exit 1; }
+
+          make -j$JOBS
+          strip -x ffmpeg
+
+      # --- 3. VERIFIKASI & TEST ENCODE LANGSUNG ---
+
+      - name: "Verifikasi Versi & Encoder libvvenc"
+        run: |
+          cd ffmpeg_source
+          file ffmpeg
+          echo -e "\n=== Version ==="
+          ./ffmpeg -version
+          echo -e "\n=== Cek Ketersediaan Encoder VVC / H.266 ==="
+          ./ffmpeg -encoders | grep -i vvenc
+
+      - name: "Smoke Test Encode VVC (1 Detik Video Sintetis)"
+        run: |
+          cd ffmpeg_source
+          echo "🚀 Menjalankan uji render 1 detik video sintetis H.266/VVC..."
+          ./ffmpeg -v error \
+            -f lavfi -i testsrc=duration=1:size=320x240:rate=30 \
+            -c:v libvvenc -preset faster -qp 32 \
+            -y test_output_vvc.mp4
+
+          echo "✅ Encode VVC Berhasil 100%!"
+          ls -lh test_output_vvc.mp4
+
+      - name: "Upload Artifact Biner FFmpeg"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-macos-arm64-vvenc-only
+          path: ffmpeg_source/ffmpeg
