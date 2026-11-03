@@ -33,7 +33,7 @@ jobs:
           echo "CXXFLAGS=-O3 -fPIC -arch arm64" >> $GITHUB_ENV
           echo "LDFLAGS=-L$INSTALL_DIR/lib" >> $GITHUB_ENV
 
-      # --- BUILD 18 EXTERNAL LIBRARIES ---
+      # --- BUILD EXTERNAL LIBRARIES (STREAMLINED) ---
 
       - name: "1. Build zlib"
         run: |
@@ -43,15 +43,7 @@ jobs:
           ./configure --prefix="$PREFIX" --static
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "2. Build libogg"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/xiph/ogg.git "$SRC/ogg"
-          cd "$SRC/ogg" && ./autogen.sh
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared
-          make -j$(sysctl -n hw.ncpu) && make install
-
-      - name: "3. Build x264 (NEON Auto-Enabled)"
+      - name: "2. Build x264 (NEON Auto-Enabled)"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://code.videolan.org/videolan/x264.git "$SRC/x264"
@@ -59,15 +51,13 @@ jobs:
           ./configure --host=aarch64-apple-darwin --prefix="$PREFIX" --enable-static --enable-pic --disable-cli
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "4. Build x265 (Official v4.3 - Assembly ON)"
+      - name: "3. Build x265 (Official v4.3 - Assembly ON)"
         run: |
           set -euxo pipefail
-          # Unduh rilis resmi x265 versi 4.3 dari MulticoreWare
           curl -sSL "https://github.com/Multicorewareinc/x265/releases/download/4.3/x265_4.3.tar.gz" -o x265_4.3.tar.gz
           mkdir -p "$SRC/x265"
           tar -xzf x265_4.3.tar.gz -C "$SRC/x265" --strip-components=1
 
-          # Bersihkan aturan kebijakan CMake usang agar kompatibel dengan CMake 4.4.3
           sed -i '' '/CMP0025/d' "$SRC/x265/source/CMakeLists.txt"
           sed -i '' '/CMP0054/d' "$SRC/x265/source/CMakeLists.txt"
 
@@ -83,7 +73,7 @@ jobs:
           ninja -C "$SRC/x265/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: x265\nDescription: H.265/HEVC video encoder\nVersion: 4.3\nLibs: -L\${libdir} -lx265 -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/x265.pc"
 
-      - name: "5. Build SVT-AV1"
+      - name: "4. Build SVT-AV1"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git "$SRC/SVT-AV1"
@@ -97,7 +87,7 @@ jobs:
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/SVT-AV1/build" install
 
-      - name: "6. Build libaom"
+      - name: "5. Build libaom"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://aomedia.googlesource.com/aom "$SRC/aom"
@@ -114,7 +104,7 @@ jobs:
           ninja -C "$SRC/aom/build" install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: aom\nDescription: AV1 Video Codec Library\nVersion: 3.8.0\nLibs: -L\${libdir} -laom -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/aom.pc"
 
-      - name: "7. Build libvpx"
+      - name: "6. Build libvpx"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git "$SRC/libvpx"
@@ -122,15 +112,7 @@ jobs:
           ../libvpx/configure --target=arm64-darwin20-gcc --prefix="$PREFIX" --disable-shared --enable-static --disable-examples --enable-pic
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "8. Build mp3lame"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/lameproject/lame.git "$SRC/lame"
-          cd "$SRC/lame"
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared --disable-frontend
-          make -j$(sysctl -n hw.ncpu) && make install
-
-      - name: "9. Build opus"
+      - name: "7. Build opus"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/xiph/opus.git "$SRC/opus"
@@ -138,15 +120,7 @@ jobs:
           ./configure --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "10. Build vorbis"
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 https://github.com/xiph/vorbis.git "$SRC/vorbis"
-          cd "$SRC/vorbis" && ./autogen.sh
-          ./configure --prefix="$PREFIX" --enable-static --disable-shared OGG_CFLAGS="-I$PREFIX/include" OGG_LIBS="-L$PREFIX/lib -logg"
-          make -j$(sysctl -n hw.ncpu) && make install
-
-      - name: "11. Build libwebp"
+      - name: "8. Build libwebp"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://chromium.googlesource.com/webm/libwebp.git "$SRC/libwebp"
@@ -155,7 +129,7 @@ jobs:
           make -j$(sysctl -n hw.ncpu) && make install
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libwebp\nDescription: WebP image codec\nVersion: 1.3.2\nLibs: -L\${libdir} -lwebp -lsharpyuv -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libwebp.pc"
 
-      - name: "12. Build fdk-aac"
+      - name: "9. Build fdk-aac"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git "$SRC/fdk-aac"
@@ -163,7 +137,7 @@ jobs:
           ./configure --prefix="$PREFIX" --enable-static --disable-shared
           make -j$(sysctl -n hw.ncpu) && make install
 
-      - name: "13. Build rubberband"
+      - name: "10. Build rubberband"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/breakfastquay/rubberband.git "$SRC/rubberband"
@@ -175,7 +149,7 @@ jobs:
           cp -r rubberband/* "$PREFIX/include/rubberband/"
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: rubberband\nDescription: Audio time-stretching and pitch-shifting library\nVersion: 3.3.0\nLibs: -L\${libdir} -lrubberband -lc++ -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/rubberband.pc"
 
-      - name: "15. Build libbs2b"
+      - name: "11. Build libbs2b"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/alexmarsev/libbs2b.git "$SRC/libbs2b"
@@ -188,7 +162,7 @@ jobs:
           cp bs2b.h bs2bclass.h bs2btypes.h bs2bversion.h "$PREFIX/include/bs2b/"
           printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: libbs2b\nDescription: Bauer stereophonic-to-binaural DSP\nVersion: 3.1.0\nLibs: -L\${libdir} -lbs2b -lc++ -lm\nCflags: -I\${includedir}/bs2b -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/libbs2b.pc"
 
-      - name: "16. Build libmysofa"
+      - name: "12. Build libmysofa"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/hoene/libmysofa.git "$SRC/libmysofa"
@@ -204,7 +178,7 @@ jobs:
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           ninja -C "$SRC/libmysofa/build" install
 
-      - name: "17. Build libsoxr"
+      - name: "13. Build libsoxr"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/chirlu/soxr.git "$SRC/soxr"
@@ -226,12 +200,12 @@ jobs:
             printf "prefix=%s\nexec_prefix=\${prefix}\nlibdir=\${prefix}/lib\nincludedir=\${prefix}/include\n\nName: soxr\nDescription: High quality sample-rate conversion library\nVersion: 0.1.3\nLibs: -L\${libdir} -lsoxr -lm\nCflags: -I\${includedir}\n" "$PREFIX" > "$PREFIX/lib/pkgconfig/soxr.pc"
           fi
 
-      - name: "18. Setup LADSPA Header"
+      - name: "14. Setup LADSPA Header"
         run: |
           set -euxo pipefail
           curl -sSL https://raw.githubusercontent.com/swh/ladspa/master/ladspa.h -o "$PREFIX/include/ladspa.h"
 
-      - name: "19. Build chromaprint"
+      - name: "15. Build chromaprint"
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/acoustid/chromaprint.git "$SRC/chromaprint"
@@ -274,8 +248,8 @@ jobs:
             --enable-videotoolbox --enable-audiotoolbox \
             --enable-asm --enable-neon \
             --enable-libx264 --enable-libx265 --enable-libsvtav1 \
-            --enable-libaom --enable-libvpx --enable-libmp3lame --enable-libopus \
-            --enable-libvorbis --enable-libwebp --enable-libfdk-aac \
+            --enable-libaom --enable-libvpx --enable-libopus \
+            --enable-libwebp --enable-libfdk-aac \
             --enable-librubberband \
             --enable-libbs2b \
             --enable-libmysofa \
